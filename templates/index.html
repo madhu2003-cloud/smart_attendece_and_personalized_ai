@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Attendance AI | Liquid Glass Portal & Live Wallpapers</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+  <!-- ==================== LIVE ANIMATED CANVAS WALLPAPER ==================== -->
+  <canvas id="live-wallpaper-canvas"></canvas>
+
+  <!-- ==================== TOAST NOTIFICATION CONTAINER ==================== -->
+  <div id="toast-container"></div>
+
+  <!-- ==================== HEADER & GLASS NAV ==================== -->
+  <header>
+    <div class="logo-container">
+      <div class="logo-icon">SA</div>
+      <div class="logo-text">
+        <h1>Smart Attendance AI</h1>
+        <p>Attendance Monitoring &middot; AI Risk Prediction &middot; Live Portal</p>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav id="main-nav">
+      <!-- Faculty Nav -->
+      <div id="faculty-nav-tabs" style="display: flex; gap: 0.4rem;">
+        <button class="nav-btn active" onclick="switchTab('tab-faculty-overview', this)">📊 Dashboard</button>
+        <button class="nav-btn" onclick="switchTab('tab-students', this)">👥 Students</button>
+        <button class="nav-btn" onclick="switchTab('tab-attendance', this)">📋 Attendance</button>
+        <button class="nav-btn" onclick="switchTab('tab-face', this)">📸 Face AI</button>
+        <button class="nav-btn" onclick="switchTab('tab-analytics', this)">🧠 ML &amp; Fitting</button>
+        <button class="nav-btn" onclick="switchTab('tab-tools', this)">🧮 Recovery Calculator</button>
+      </div>
+
+      <!-- Student Nav -->
+      <div id="student-nav-tabs" style="display: none; gap: 0.4rem;">
+        <button class="nav-btn active" onclick="switchTab('tab-student-profile', this)">👤 My Stats</button>
+        <button class="nav-btn" onclick="switchTab('tab-student-ai-advisor', this)">🤖 AI Schedule Advisor</button>
+        <button class="nav-btn" onclick="switchTab('tab-student-notifs', this)">🔔 My Notifications</button>
+        <button class="nav-btn" onclick="switchTab('tab-tools', this)">🧮 Recovery Calculator</button>
+      </div>
+    </nav>
+
+    <!-- Header Actions & Controls -->
+    <div class="header-actions">
+      <!-- Live Wallpaper Switcher -->
+      <select id="wallpaper-select" class="wallpaper-selector" onchange="changeWallpaperMode(this.value)">
+        <option value="particles">🎆 Constellation Stars</option>
+        <option value="aurora">🌊 Cyber Aurora</option>
+        <option value="grid">🌌 Cyber Grid Mesh</option>
+        <option value="dark">🌙 Dark Glass</option>
+      </select>
+
+      <!-- Notifications Bell -->
+      <div class="notif-bell" onclick="toggleNotifDrawer()">
+        🔔
+        <span id="notif-badge-count" class="notif-count" style="display:none;">0</span>
+      </div>
+
+      <!-- User Role Badge -->
+      <div class="user-badge" id="user-badge-btn" onclick="openAuthModal()">
+        <span id="user-role-icon">👨‍🏫</span>
+        <span id="user-name-display">Faculty Mode</span>
+        <span style="font-size:0.7rem; color:var(--accent-cyan)">[Switch]</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ==================== NOTIFICATIONS DRAWER ==================== -->
+  <div id="notif-drawer" class="notif-drawer">
+    <div class="notif-header">
+      <span>🔔 Risk Alerts & Notifications</span>
+      <button class="btn btn-secondary" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;" onclick="markNotificationsRead()">Mark read</button>
+    </div>
+    <div id="notif-list-body" class="notif-list">
+      <div style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No new notifications.</div>
+    </div>
+  </div>
+
+  <!-- ==================== AUTH / ROLE LOGIN MODAL ==================== -->
+  <div id="auth-modal" class="modal-overlay">
+    <div class="modal-glass">
+      <div class="modal-title">🔐 Role Authentication</div>
+      
+      <div class="role-switcher-tabs">
+        <button id="modal-tab-faculty" class="role-tab-btn active" onclick="setAuthRoleTab('faculty')">👨‍🏫 Faculty / Teacher</button>
+        <button id="modal-tab-student" class="role-tab-btn" onclick="setAuthRoleTab('student')">👨‍🎓 Student</button>
+      </div>
+
+      <form id="auth-form" onsubmit="handleAuthLogin(event)">
+        <div id="auth-faculty-fields">
+          <div class="form-group">
+            <label>Faculty Password (Default: admin123)</label>
+            <input type="password" id="auth-faculty-pass" placeholder="Enter password">
+          </div>
+        </div>
+
+        <div id="auth-student-fields" style="display:none;">
+          <div class="form-group">
+            <label>Student Roll Number (e.g. 101, 102)</label>
+            <input type="text" id="auth-student-roll" placeholder="e.g. 101">
+          </div>
+        </div>
+
+        <button type="submit" class="btn" style="width: 100%; margin-top: 1rem;">Login / Switch Role</button>
+        <div id="auth-status-line" style="margin-top:0.8rem; font-size:0.85rem; text-align:center;"></div>
+      </form>
+      
+      <button class="btn btn-secondary" style="width:100%; margin-top:0.8rem;" onclick="closeAuthModal()">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ==================== CUSTOM NOTICE DISPATCH MODAL ==================== -->
+  <div id="notice-modal" class="modal-overlay">
+    <div class="modal-glass">
+      <div class="modal-title">📢 Send Custom Student Notice</div>
+      <form onsubmit="sendCustomNotice(event)">
+        <div class="form-group">
+          <label>Target Student Roll Number</label>
+          <input type="text" id="notice-roll" required placeholder="e.g. 101">
+        </div>
+        <div class="form-group">
+          <label>Notice Title</label>
+          <input type="text" id="notice-title" value="Attendance Warning" required>
+        </div>
+        <div class="form-group">
+          <label>Subject</label>
+          <input type="text" id="notice-subject" value="Data Structures" required>
+        </div>
+        <div class="form-group">
+          <label>Message Content</label>
+          <textarea id="notice-message" rows="3" required placeholder="Write attendance warning or instructions..."></textarea>
+        </div>
+        <button type="submit" class="btn" style="width:100%;">Dispatch Notice to Student</button>
+      </form>
+      <button class="btn btn-secondary" style="width:100%; margin-top:0.8rem;" onclick="closeNoticeModal()">Close</button>
+    </div>
+  </div>
+
+  <!-- ==================== MAIN CONTENT AREA ==================== -->
+  <main>
+
+    <!-- ====================================================================
+         FACULTY VIEW 1: OVERVIEW DASHBOARD
+    ==================================================================== -->
+    <section id="tab-faculty-overview" class="tab-content active">
+      <h2 class="tab-title">
+        <span>Faculty Live Dashboard</span>
+        <div style="display:flex; gap:0.5rem;">
+          <button class="btn btn-secondary" onclick="openNoticeModal()">📢 Send Notice</button>
+          <button class="btn btn-secondary" onclick="loadFacultyDashboardData()">🔄 Refresh Data</button>
+        </div>
+      </h2>
+
+      <!-- Top Metric Cards -->
+      <div class="grid-4" style="margin-bottom: 1.5rem;">
+        <div class="card stat-card">
+          <div class="stat-header">
+            <span>Total Enrolled</span>
+            <div class="stat-icon" style="background:rgba(99,102,241,0.2); color:#818cf8;">👨‍🎓</div>
+          </div>
+          <div class="stat-value" id="dash-total-students">0</div>
+          <div class="stat-footer">Active Registered Students</div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-header">
+            <span>At-Risk Students</span>
+            <div class="stat-icon" style="background:rgba(244,63,94,0.2); color:#f87171;">⚠️</div>
+          </div>
+          <div class="stat-value" id="dash-risk-students" style="color:var(--accent-rose)">0</div>
+          <div class="stat-footer">Attendance &lt; 75% or ML Risk</div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-header">
+            <span>Avg Attendance</span>
+            <div class="stat-icon" style="background:rgba(16,185,129,0.2); color:#34d399;">📈</div>
+          </div>
+          <div class="stat-value" id="dash-avg-attendance">0%</div>
+          <div class="stat-footer">Overall System Average</div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-header">
+            <span>Active ML Models</span>
+            <div class="stat-icon" style="background:rgba(6,182,212,0.2); color:#38bdf8;">🧠</div>
+          </div>
+          <div class="stat-value">2</div>
+          <div class="stat-footer">Random Forest &amp; XGBoost</div>
+        </div>
+      </div>
+
+      <!-- Quick Action Grid -->
+      <div class="grid-2">
+        <!-- Top At-Risk Table -->
+        <div class="card">
+          <div class="card-title">
+            <span>⚠️ At-Risk Students Alert List</span>
+            <button class="btn btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem;" onclick="generateRiskNotifications()">⚡ Trigger Risk Alerts</button>
+          </div>
+          <div style="overflow-x: auto; max-height: 400px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Roll</th>
+                  <th>Attendance</th>
+                  <th>Absences</th>
+                  <th>Risk Prob</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="dash-risk-table-body">
+                <tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Loading risk data...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Recent Attendance Stream -->
+        <div class="card">
+          <div class="card-title">
+            <span>📋 System Attendance Stream</span>
+          </div>
+          <div style="overflow-x: auto; max-height: 400px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Roll</th>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody id="dash-attendance-table-body">
+                <tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Loading logs...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         FACULTY VIEW 2: STUDENT REGISTRATION
+    ==================================================================== -->
+    <section id="tab-students" class="tab-content">
+      <h2 class="tab-title">Student Registration &amp; Directory</h2>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>Register New Student</span></div>
+          <form id="register-form" onsubmit="registerStudent(event)">
+            <div class="form-group">
+              <label>Roll Number</label>
+              <input type="text" id="reg-roll" required placeholder="e.g. 101">
+            </div>
+            <div class="form-group">
+              <label>Student Name</label>
+              <input type="text" id="reg-name" required placeholder="e.g. Sarah Connor">
+            </div>
+            <div class="grid-2" style="gap: 0.75rem;">
+              <div class="form-group">
+                <label>Department</label>
+                <input type="text" id="reg-dept" required placeholder="e.g. CSE">
+              </div>
+              <div class="form-group">
+                <label>Year</label>
+                <input type="text" id="reg-year" required placeholder="e.g. 2nd">
+              </div>
+            </div>
+            <div class="grid-2" style="gap: 0.75rem;">
+              <div class="form-group">
+                <label>Section</label>
+                <input type="text" id="reg-section" required placeholder="e.g. A">
+              </div>
+              <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="reg-email" required placeholder="e.g. sarah@univ.edu">
+              </div>
+            </div>
+            <button type="submit" class="btn" style="width: 100%;">Register Student</button>
+            <div id="reg-status" style="margin-top: 0.8rem; font-size: 0.85rem;"></div>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span>Registered Students Directory</span>
+            <button class="btn btn-secondary" onclick="loadStudents()">Refresh</button>
+          </div>
+          <div style="overflow-x: auto; max-height: 520px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Roll</th><th>Name</th><th>Dept</th><th>Year</th>
+                  <th>Email</th><th>Samples</th>
+                </tr>
+              </thead>
+              <tbody id="student-table-body">
+                <tr><td colspan="6" style="text-align:center;">No students yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         FACULTY VIEW 3: ATTENDANCE MANAGEMENT
+    ==================================================================== -->
+    <section id="tab-attendance" class="tab-content">
+      <h2 class="tab-title">Attendance Logging &amp; Record Management</h2>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>Mark Manual Attendance</span></div>
+          <form onsubmit="markAttendance(event)">
+            <div class="form-group">
+              <label>Student Roll Number</label>
+              <input type="text" id="att-roll" required placeholder="e.g. 101">
+            </div>
+            <div class="form-group">
+              <label>Subject</label>
+              <select id="att-subject">
+                <option value="Data Structures">Data Structures</option>
+                <option value="Mathematics">Mathematics</option>
+                <option value="Database Systems">Database Systems</option>
+                <option value="Operating Systems">Operating Systems</option>
+                <option value="AI & ML">AI &amp; ML</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Date (Defaults to Today)</label>
+              <input type="date" id="att-date">
+            </div>
+            <button type="submit" class="btn" style="width: 100%;">Mark Present</button>
+            <div id="att-status" style="margin-top: 0.8rem; font-size: 0.85rem;"></div>
+          </form>
+          <div style="margin-top:1.5rem; padding:1rem; background:rgba(255,255,255,0.03); border-radius:12px; font-size:0.82rem; color:var(--text-muted);">
+            <b>Note:</b> Same-day duplicate prevention enforced by <code>UNIQUE(roll_number, date)</code> constraint.
+          </div>
+          <button class="btn btn-secondary" style="width:100%; margin-top:1rem;" onclick="seedAttendance()">
+            🌱 Seed Demo Attendance Records
+          </button>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span>Attendance Log Stream</span>
+            <button class="btn btn-secondary" onclick="loadAttendanceLogs()">Refresh</button>
+          </div>
+          <div style="overflow-x: auto; max-height: 520px;">
+            <table>
+              <thead>
+                <tr><th>Date</th><th>Time</th><th>Roll</th><th>Name</th><th>Subject</th><th>Status</th></tr>
+              </thead>
+              <tbody id="attendance-table-body">
+                <tr><td colspan="6" style="text-align:center;">No records.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         FACULTY VIEW 4: FACE RECOGNITION & COLLECTION
+    ==================================================================== -->
+    <section id="tab-face" class="tab-content">
+      <h2 class="tab-title">Face Detection &amp; Identity Recognition Module</h2>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>Face Sample Collector</span></div>
+          <div class="form-group">
+            <label>Select Registered Student</label>
+            <select id="face-student-select" onchange="startWebcam('face')">
+              <option value="">-- Select Student --</option>
+            </select>
+          </div>
+          <div class="scanner-viewport">
+            <video id="face-webcam" autoplay playsinline></video>
+            <img id="face-preview" style="display:none;" alt="Preview">
+            <div class="scanner-overlay"></div>
+          </div>
+          <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+            <button class="btn" style="flex:1;" onclick="captureFaceSample()">📸 Capture Sample</button>
+            <button class="btn btn-secondary" onclick="startWebcam('face')">📷 Reset Cam</button>
+          </div>
+          <div id="face-status" style="margin-top:0.8rem; font-size:0.85rem;"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span>Identity Scanner (Live Face Scan)</span></div>
+          <div class="scanner-viewport">
+            <video id="rec-webcam" autoplay playsinline></video>
+            <div class="scanner-overlay" style="border-color:var(--accent-indigo);"></div>
+          </div>
+          <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+            <button class="btn" style="flex:1;" onclick="startWebcam('recognize')">▶️ Start Live Cam</button>
+            <button class="btn btn-success" style="flex:1;" onclick="scanFaceFrame()">🔍 Scan &amp; Match Face</button>
+          </div>
+          <div id="rec-output" class="terminal-box" style="margin-top:1rem; min-height:120px;">Ready to scan face. Select model and click scan.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         FACULTY VIEW 5: ML ANALYTICS & FITTING CONCEPTS
+    ==================================================================== -->
+    <section id="tab-analytics" class="tab-content">
+      <h2 class="tab-title">
+        <span>Machine Learning Pipeline &amp; Fitting Diagnostics</span>
+        <button class="btn" onclick="runMLPipeline()">🚀 Run ML Pipeline</button>
+      </h2>
+
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-title"><span>Execution Output Terminal</span></div>
+        <pre id="ml-log-output" class="terminal-box">Pipeline stdout log will appear here after clicking "Run ML Pipeline".</pre>
+      </div>
+
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-title"><span>🤖 2 Core ML Models Performance Comparison</span></div>
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Accuracy</th>
+                <th>Precision</th>
+                <th>Recall</th>
+                <th>Recall (At Risk Class)</th>
+                <th>F1 Score</th>
+              </tr>
+            </thead>
+            <tbody id="ml-metrics-table-body">
+              <tr><td colspan="6" style="text-align:center;">Run ML Pipeline to view metrics.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Model Fitting Concepts Section -->
+      <div class="card">
+        <div class="card-title">
+          <span>🎯 Model Fitting Concepts Analysis (Underfitting vs Overfitting vs Good Fitting)</span>
+          <button class="btn btn-secondary" onclick="loadMLFittingConcepts()">Analyze Fitting</button>
+        </div>
+        
+        <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:1.2rem;">
+          Demonstrating Machine Learning model generalization across three structural regimes:
+        </p>
+
+        <div class="grid-3" style="margin-bottom:1.5rem;">
+          <div class="glass-card" style="border-left:4px solid var(--accent-rose);">
+            <h4 style="color:var(--accent-rose); margin-bottom:0.5rem;">1. Underfitting (High Bias)</h4>
+            <p style="font-size:0.83rem; color:var(--text-muted);">Model: <code>DecisionTree (max_depth=1)</code></p>
+            <p style="font-size:0.83rem; margin-top:0.4rem;" id="fit-underfit-desc">Too simple to capture dataset features. Performs poorly on both training and testing datasets.</p>
+            <div style="margin-top:0.8rem; font-weight:700; font-size:0.88rem;" id="fit-underfit-scores">Train: -- | Test: --</div>
+          </div>
+
+          <div class="glass-card" style="border-left:4px solid var(--accent-amber);">
+            <h4 style="color:var(--accent-amber); margin-bottom:0.5rem;">2. Overfitting (High Variance)</h4>
+            <p style="font-size:0.83rem; color:var(--text-muted);">Model: <code>DecisionTree (max_depth=25)</code></p>
+            <p style="font-size:0.83rem; margin-top:0.4rem;" id="fit-overfit-desc">Memorizes training noise. Achieves ~100% on training data but fails to generalize to test data.</p>
+            <div style="margin-top:0.8rem; font-weight:700; font-size:0.88rem;" id="fit-overfit-scores">Train: -- | Test: --</div>
+          </div>
+
+          <div class="glass-card" style="border-left:4px solid var(--accent-emerald);">
+            <h4 style="color:var(--accent-emerald); margin-bottom:0.5rem;">3. Good Fitting (Balanced)</h4>
+            <p style="font-size:0.83rem; color:var(--text-muted);">Model: <code>Random Forest / XGBoost</code></p>
+            <p style="font-size:0.83rem; margin-top:0.4rem;" id="fit-goodfit-desc">Optimal bias-variance balance. Generalizes well with strong accuracy on both train &amp; test sets.</p>
+            <div style="margin-top:0.8rem; font-weight:700; font-size:0.88rem;" id="fit-goodfit-scores">Train: -- | Test: --</div>
+          </div>
+        </div>
+
+        <div style="text-align:center;">
+          <img id="fitting-plot-img" style="max-width:100%; border-radius:12px; border:1px solid var(--glass-border);" src="/static/plots/fitting_comparison.png" alt="Fitting Comparison Chart">
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         STUDENT VIEW 1: PERSONAL STATS & PROFILE
+    ==================================================================== -->
+    <section id="tab-student-profile" class="tab-content">
+      <h2 class="tab-title">
+        <span>👨‍🎓 Student Personal Portal</span>
+        <div>
+          <button class="btn btn-secondary" onclick="window.print()">📥 Print / Export Report</button>
+          <span id="student-roll-badge" class="badge badge-info">Roll: 101</span>
+        </div>
+      </h2>
+
+      <div class="grid-4" style="margin-bottom: 1.5rem;">
+        <div class="card stat-card">
+          <div class="stat-header">
+            <span>Overall Attendance</span>
+            <div class="stat-icon" style="background:rgba(6,182,212,0.2); color:#38bdf8;">📊</div>
+          </div>
+          <div class="stat-value" id="stu-att-pct">0%</div>
+          <div class="stat-footer" id="stu-att-status">Status: Normal</div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-header">
+            <span>Risk Probability</span>
+            <div class="stat-icon" style="background:rgba(244,63,94,0.2); color:#f87171;">⚡</div>
+          </div>
+          <div class="stat-value" id="stu-risk-prob" style="color:var(--accent-rose)">0%</div>
+          <div class="stat-footer" id="stu-risk-label">AI Risk Assessment</div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-header">
+            <span>Classes Attended</span>
+            <div class="stat-icon" style="background:rgba(16,185,129,0.2); color:#34d399;">✅</div>
+          </div>
+          <div class="stat-value" id="stu-classes-attended">0 / 0</div>
+          <div class="stat-footer">Total Classes Held</div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-header">
+            <span>Consecutive Absences</span>
+            <div class="stat-icon" style="background:rgba(245,158,11,0.2); color:#fbbf24;">⚠️</div>
+          </div>
+          <div class="stat-value" id="stu-consec-absent">0</div>
+          <div class="stat-footer">Recent Missed Lectures</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>📚 Subject Attendance &amp; Performance Matrix</span></div>
+          <div style="overflow-x: auto;">
+            <table>
+              <thead>
+                <tr><th>Subject</th><th>Attendance %</th><th>Status</th><th>Recommended Action</th></tr>
+              </thead>
+              <tbody id="stu-subject-table">
+                <tr><td>Data Structures</td><td>62.5%</td><td><span class="badge badge-risk">At Risk</span></td><td>Attend next 4 classes</td></tr>
+                <tr><td>Mathematics</td><td>70.0%</td><td><span class="badge badge-warning">Warning</span></td><td>Maintain attendance</td></tr>
+                <tr><td>Database Systems</td><td>85.0%</td><td><span class="badge badge-success">Good</span></td><td>On Track</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span>🎯 Quick Attendance Recovery Goal</span></div>
+          <div style="font-size:0.92rem; line-height:1.6; color:var(--text-muted);">
+            <p style="margin-bottom:0.8rem;">
+              Based on your attendance history, you are currently <b style="color:var(--accent-rose)">At Risk</b> in 1 subject.
+            </p>
+            <ul style="padding-left:1.2rem; margin-bottom:1.2rem;">
+              <li>Target attendance threshold is set at <b>75%</b>.</li>
+              <li>You need to attend the next <b>4 consecutive classes</b> to bring your attendance back to safe standing.</li>
+              <li>Use the <b>AI Schedule Advisor</b> tab to generate your 7-day time-blocked recovery schedule.</li>
+            </ul>
+            <button class="btn" onclick="switchTab('tab-student-ai-advisor', document.querySelectorAll('#student-nav-tabs .nav-btn')[1])">
+              🤖 Open AI Schedule Advisor
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         STUDENT VIEW 2: AI STUDY & ATTENDANCE ADVISOR
+    ==================================================================== -->
+    <section id="tab-student-ai-advisor" class="tab-content">
+      <h2 class="tab-title">
+        <span>🤖 AI Student Attendance &amp; Study Schedule Advisor</span>
+        <span class="badge badge-info">Powered by Gemini AI</span>
+      </h2>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>Configure Your AI Study Plan</span></div>
+          <form onsubmit="runAIAdvisor(event)">
+            <div class="form-group">
+              <label>Target Attendance Percentage (%)</label>
+              <input type="number" id="ai-target-pct" value="75" min="50" max="100" required>
+            </div>
+
+            <div class="form-group">
+              <label>Weak Subjects / Low Performance Areas</label>
+              <input type="text" id="ai-weak-subjects" value="Data Structures, Mathematics" placeholder="e.g. Data Structures, Physics">
+            </div>
+
+            <div class="form-group">
+              <label>Available Daily Study Hours</label>
+              <input type="number" id="ai-daily-hours" value="2.5" step="0.5" min="1" max="10" required>
+            </div>
+
+            <button type="submit" class="btn" style="width: 100%;">⚡ Generate Personalized AI Schedule Plan</button>
+            <div id="ai-status" style="margin-top:0.8rem; font-size:0.85rem;"></div>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span>✨ Personalized AI Plan &amp; Timetable</span>
+            <span id="ai-plan-source" class="badge badge-success">Engine Ready</span>
+          </div>
+          <div id="ai-plan-content" class="ai-output-box" style="max-height: 520px; overflow-y: auto;">
+            Click <b>"Generate Personalized AI Schedule Plan"</b> to generate a 7-day time-blocked timetable and recovery schedule tailored for your weak subjects.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         STUDENT VIEW 3: PERSONAL NOTIFICATIONS
+    ==================================================================== -->
+    <section id="tab-student-notifs" class="tab-content">
+      <h2 class="tab-title">Student Personal Risk Alerts &amp; Notifications</h2>
+      <div class="card">
+        <div class="card-title">
+          <span>Personal Alerts Center</span>
+          <button class="btn btn-secondary" onclick="loadNotifications()">Refresh</button>
+        </div>
+        <div id="stu-notif-container" style="max-height: 500px; overflow-y: auto;">
+          <div style="padding: 2rem; text-align: center; color: var(--text-muted);">Loading alerts...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         SHARED VIEW: REAL-TIME INTERACTIVE RECOVERY CALCULATOR
+    ==================================================================== -->
+    <section id="tab-tools" class="tab-content">
+      <h2 class="tab-title">🧮 Real-Time Interactive Attendance Target Recovery Calculator</h2>
+      
+      <div class="grid-2">
+        <!-- Interactive Controls -->
+        <div class="card">
+          <div class="card-title"><span>Interactive Sliders &amp; Inputs</span></div>
+          
+          <div class="form-group">
+            <label>Total Classes Held So Far: <b id="slider-val-total" style="color:var(--accent-cyan)">40</b></label>
+            <input type="range" class="range-slider" id="slider-total" min="5" max="120" value="40" oninput="updateInteractiveCalculator()">
+          </div>
+
+          <div class="form-group">
+            <label>Classes Attended: <b id="slider-val-attended" style="color:var(--accent-emerald)">25</b></label>
+            <input type="range" class="range-slider" id="slider-attended" min="0" max="120" value="25" oninput="updateInteractiveCalculator()">
+          </div>
+
+          <div class="form-group">
+            <label>Target Minimum Attendance Threshold (%): <b id="slider-val-target" style="color:var(--accent-indigo)">75%</b></label>
+            <input type="range" class="range-slider" id="slider-target" min="50" max="95" value="75" oninput="updateInteractiveCalculator()">
+          </div>
+        </div>
+
+        <!-- Real-Time Calculation Result & SVG Gauge -->
+        <div class="card" style="text-align:center;">
+          <div class="card-title"><span>Live Attendance Gauge &amp; Recovery Analysis</span></div>
+          
+          <!-- SVG Circular Progress Ring -->
+          <svg viewBox="0 0 36 36" class="circular-chart">
+            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <path id="gauge-circle" class="circle" stroke-dasharray="62.5, 100" stroke="#06b6d4" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <text id="gauge-text" x="18" y="20.35" class="percentage">62.5%</text>
+          </svg>
+
+          <div id="calc-live-result" style="margin-top:1rem; padding:1.2rem; border-radius:14px; background:rgba(255,255,255,0.03); font-size:1rem; line-height:1.6;">
+            Calculating status...
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==================== FRONTEND JAVASCRIPT ==================== -->
+  <script>
+    // State management
+    let CURRENT_ROLE = 'faculty';
+    let LOGGED_STUDENT = null;
+    let WEBCAM_STREAM = null;
+    let WALLPAPER_ANIMATION_ID = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      initLiveWallpaperCanvas();
+      checkCurrentSession();
+      loadFacultyDashboardData();
+      updateInteractiveCalculator();
+    });
+
+    // ----------------------------------------------------------------------
+    // 🎆 LIVE WALLPAPER CANVAS ENGINE
+    // ----------------------------------------------------------------------
+    let canvas, ctx, particles = [], animationMode = 'particles';
+
+    function initLiveWallpaperCanvas() {
+      canvas = document.getElementById('live-wallpaper-canvas');
+      if (!canvas) return;
+      ctx = canvas.getContext('2d');
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+
+      // Create initial particles
+      particles = [];
+      for (let i = 0; i < 70; i++) {
+        particles.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 1.2,
+          vy: (Math.random() - 0.5) * 1.2,
+          radius: Math.random() * 2.5 + 1,
+          color: Math.random() > 0.5 ? 'rgba(6, 182, 212, ' : 'rgba(99, 102, 241, '
+        });
+      }
+
+      startWallpaperAnimation();
+    }
+
+    function resizeCanvas() {
+      if (!canvas) return;
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    function changeWallpaperMode(mode) {
+      animationMode = mode;
+      canvas.style.display = mode === 'dark' ? 'none' : 'block';
+    }
+
+    function startWallpaperAnimation() {
+      if (WALLPAPER_ANIMATION_ID) cancelAnimationFrame(WALLPAPER_ANIMATION_ID);
+
+      function loop() {
+        if (animationMode !== 'dark') {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          if (animationMode === 'particles') {
+            // Draw floating constellation particles
+            for (let i = 0; i < particles.length; i++) {
+              let p = particles[i];
+              p.x += p.vx;
+              p.y += p.vy;
+
+              if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+              if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+
+              ctx.beginPath();
+              ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+              ctx.fillStyle = p.color + '0.7)';
+              ctx.fill();
+
+              // Connect nearby particles
+              for (let j = i + 1; j < particles.length; j++) {
+                let p2 = particles[j];
+                let dist = Math.hypot(p.x - p2.x, p.y - p2.y);
+                if (dist < 130) {
+                  ctx.beginPath();
+                  ctx.moveTo(p.x, p.y);
+                  ctx.lineTo(p2.x, p2.y);
+                  ctx.strokeStyle = p.color + (1 - dist / 130) * 0.25 + ')';
+                  ctx.lineWidth = 0.8;
+                  ctx.stroke();
+                }
+              }
+            }
+          } else if (animationMode === 'aurora') {
+            // Cyber Aurora Waves
+            let time = Date.now() * 0.001;
+            for (let i = 0; i < 3; i++) {
+              ctx.beginPath();
+              ctx.moveTo(0, canvas.height);
+              for (let x = 0; x <= canvas.width; x += 30) {
+                let y = Math.sin(x * 0.004 + time + i) * 60 + canvas.height * 0.6;
+                ctx.lineTo(x, y);
+              }
+              ctx.lineTo(canvas.width, canvas.height);
+              ctx.fillStyle = i === 0 ? 'rgba(6, 182, 212, 0.06)' : i === 1 ? 'rgba(99, 102, 241, 0.06)' : 'rgba(168, 85, 247, 0.04)';
+              ctx.fill();
+            }
+          } else if (animationMode === 'grid') {
+            // Cyber Grid Mesh
+            ctx.strokeStyle = 'rgba(99, 102, 241, 0.08)';
+            ctx.lineWidth = 1;
+            let step = 60;
+            for (let x = 0; x < canvas.width; x += step) {
+              ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += step) {
+              ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+          }
+        }
+        WALLPAPER_ANIMATION_ID = requestAnimationFrame(loop);
+      }
+      loop();
+    }
+
+    // ----------------------------------------------------------------------
+    // 🔔 TOAST NOTIFICATIONS & AUDIO FEEDBACK
+    // ----------------------------------------------------------------------
+    function showToast(title, message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.style.borderColor = type === 'critical' ? 'var(--accent-rose)' : type === 'success' ? 'var(--accent-emerald)' : 'var(--accent-cyan)';
+      toast.innerHTML = `
+        <div style="font-size:1.3rem;">${type === 'critical' ? '⚠️' : type === 'success' ? '✅' : '🔔'}</div>
+        <div style="flex:1;">
+          <div style="font-weight:700; font-size:0.9rem;">${title}</div>
+          <div style="font-size:0.8rem; color:var(--text-muted);">${message}</div>
+        </div>
+        <button style="background:none; border:none; color:white; cursor:pointer; font-size:1rem;" onclick="this.parentElement.remove()">✕</button>
+      `;
+      container.appendChild(toast);
+      playNotificationSound();
+      setTimeout(() => { if (toast.parentElement) toast.remove(); }, 5000);
+    }
+
+    function playNotificationSound() {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+      } catch (e) {}
+    }
+
+    // ----------------------------------------------------------------------
+    // 🧮 REAL-TIME INTERACTIVE RECOVERY CALCULATOR
+    // ----------------------------------------------------------------------
+    function updateInteractiveCalculator() {
+      const total = parseInt(document.getElementById('slider-total').value);
+      let attended = parseInt(document.getElementById('slider-attended').value);
+      if (attended > total) {
+        attended = total;
+        document.getElementById('slider-attended').value = total;
+      }
+      const target = parseFloat(document.getElementById('slider-target').value);
+
+      document.getElementById('slider-val-total').innerText = total;
+      document.getElementById('slider-val-attended').innerText = attended;
+      document.getElementById('slider-val-target').innerText = `${target}%`;
+
+      const currentPct = total > 0 ? Math.round((100.0 * attended / total) * 10) / 10 : 0;
+
+      // Update SVG Gauge Circle
+      const circle = document.getElementById('gauge-circle');
+      const text = document.getElementById('gauge-text');
+      if (circle && text) {
+        circle.setAttribute('stroke-dasharray', `${currentPct}, 100`);
+        circle.setAttribute('stroke', currentPct >= target ? 'var(--accent-emerald)' : currentPct >= 65 ? 'var(--accent-amber)' : 'var(--accent-rose)');
+        text.innerText = `${currentPct}%`;
+      }
+
+      const resultBox = document.getElementById('calc-live-result');
+      const targetRatio = target / 100.0;
+
+      if (currentPct >= target) {
+        const maxMissable = Math.floor((attended / targetRatio) - total);
+        resultBox.innerHTML = `
+          <div style="color:var(--accent-emerald); font-weight:800; font-size:1.15rem; margin-bottom:0.4rem;">✅ Safe Standing (${currentPct}%)</div>
+          <div>Great job! Your attendance is above your target of <b>${target}%</b>.</div>
+          <div style="margin-top:0.6rem;" class="badge badge-success">You can miss up to ${Math.max(0, maxMissable)} class(es) while staying above target.</div>
+        `;
+      } else {
+        const x = Math.ceil((targetRatio * total - attended) / (1.0 - targetRatio));
+        const needed = Math.max(1, x);
+        resultBox.innerHTML = `
+          <div style="color:var(--accent-rose); font-weight:800; font-size:1.15rem; margin-bottom:0.4rem;">⚠️ At-Risk Standing (${currentPct}%)</div>
+          <div>Your attendance is below your target threshold of <b>${target}%</b>.</div>
+          <div style="margin-top:0.6rem;" class="badge badge-risk">Attending Next ${needed} Consecutive Class(es) Required</div>
+        `;
+      }
+    }
+
+    // ----------------------------------------------------------------------
+    // Navigation & Tab Switching
+    // ----------------------------------------------------------------------
+    function switchTab(tabId, btn) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById(tabId);
+      if (target) target.classList.add('active');
+
+      if (btn) {
+        document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+        btn.classList.add('active');
+      }
+
+      if (tabId === 'tab-students') loadStudents();
+      if (tabId === 'tab-attendance') loadAttendanceLogs();
+      if (tabId === 'tab-face') populateStudentDropdown();
+      if (tabId === 'tab-analytics') loadMLMetrics();
+      if (tabId === 'tab-student-notifs') loadNotifications();
+    }
+
+    // ----------------------------------------------------------------------
+    // Auth & Role Management
+    // ----------------------------------------------------------------------
+    function checkCurrentSession() {
+      fetch('/api/auth/current')
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.role) applyUserRole(data.role, data.user);
+        });
+    }
+
+    function openAuthModal() { document.getElementById('auth-modal').classList.add('open'); }
+    function closeAuthModal() { document.getElementById('auth-modal').classList.remove('open'); }
+    function openNoticeModal() { document.getElementById('notice-modal').classList.add('open'); }
+    function closeNoticeModal() { document.getElementById('notice-modal').classList.remove('open'); }
+
+    function setAuthRoleTab(role) {
+      document.getElementById('modal-tab-faculty').classList.toggle('active', role === 'faculty');
+      document.getElementById('modal-tab-student').classList.toggle('active', role === 'student');
+      document.getElementById('auth-faculty-fields').style.display = role === 'faculty' ? 'block' : 'none';
+      document.getElementById('auth-student-fields').style.display = role === 'student' ? 'block' : 'none';
+    }
+
+    function handleAuthLogin(e) {
+      e.preventDefault();
+      const isFaculty = document.getElementById('modal-tab-faculty').classList.contains('active');
+      const payload = {
+        role: isFaculty ? 'faculty' : 'student',
+        password: document.getElementById('auth-faculty-pass').value,
+        roll_number: document.getElementById('auth-student-roll').value
+      };
+
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(res => res.json())
+      .then(res => {
+        if (res.status === 'success') {
+          applyUserRole(res.user.role, res.user);
+          closeAuthModal();
+          showToast('Login Successful', `Logged in as ${res.user.name || res.user.role}`, 'success');
+        } else {
+          document.getElementById('auth-status-line').innerHTML = `<span style="color:var(--accent-rose)">${res.message}</span>`;
+        }
+      });
+    }
+
+    function applyUserRole(role, user) {
+      CURRENT_ROLE = role;
+      LOGGED_STUDENT = user;
+
+      const isFaculty = role === 'faculty';
+      document.getElementById('faculty-nav-tabs').style.display = isFaculty ? 'flex' : 'none';
+      document.getElementById('student-nav-tabs').style.display = !isFaculty ? 'flex' : 'none';
+
+      document.getElementById('user-role-icon').innerText = isFaculty ? '👨‍🏫' : '👨‍🎓';
+      document.getElementById('user-name-display').innerText = isFaculty ? 'Faculty Mode' : `Student: ${user.name || user.roll_number}`;
+
+      if (!isFaculty) {
+        document.getElementById('student-roll-badge').innerText = `Roll: ${user.roll_number}`;
+        switchTab('tab-student-profile', document.querySelectorAll('#student-nav-tabs .nav-btn')[0]);
+        loadStudentPortalData();
+      } else {
+        switchTab('tab-faculty-overview', document.querySelectorAll('#faculty-nav-tabs .nav-btn')[0]);
+        loadFacultyDashboardData();
+      }
+
+      loadNotifications();
+    }
+
+    // ----------------------------------------------------------------------
+    // Dashboard Data & Notices
+    // ----------------------------------------------------------------------
+    function loadFacultyDashboardData() {
+      fetch('/api/students')
+        .then(res => res.json())
+        .then(students => {
+          document.getElementById('dash-total-students').innerText = students.length;
+        });
+
+      fetch('/api/risk/top')
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === 'success' && data.students) {
+            const tbody = document.getElementById('dash-risk-table-body');
+            document.getElementById('dash-risk-students').innerText = data.students.length;
+            tbody.innerHTML = data.students.map(s => `
+              <tr>
+                <td><b>${s.roll_number}</b></td>
+                <td>${s.attendance_percentage}%</td>
+                <td>${s.consecutive_absences}</td>
+                <td><span class="badge badge-risk">${Math.round(s.predicted_probability*100)}% Risk</span></td>
+                <td><button class="btn btn-secondary" style="padding:0.2rem 0.5rem; font-size:0.75rem;" onclick="openNoticeForRoll('${s.roll_number}')">Send Notice</button></td>
+              </tr>
+            `).join('');
+          }
+        });
+
+      loadAttendanceLogs();
+    }
+
+    function openNoticeForRoll(roll) {
+      document.getElementById('notice-roll').value = roll;
+      openNoticeModal();
+    }
+
+    function sendCustomNotice(e) {
+      e.preventDefault();
+      const payload = {
+        roll_number: document.getElementById('notice-roll').value,
+        title: document.getElementById('notice-title').value,
+        subject: document.getElementById('notice-subject').value,
+        message: document.getElementById('notice-message').value
+      };
+
+      fetch('/api/notifications/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          showToast('Notice Sent', data.message, 'success');
+          closeNoticeModal();
+          loadNotifications();
+        }
+      });
+    }
+
+    // ----------------------------------------------------------------------
+    // Student Portal
+    // ----------------------------------------------------------------------
+    function loadStudentPortalData() {
+      if (!LOGGED_STUDENT || !LOGGED_STUDENT.roll_number) return;
+      const roll = LOGGED_STUDENT.roll_number;
+
+      fetch('/api/risk/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roll_number: roll })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          document.getElementById('stu-att-pct').innerText = `${data.attendance_percentage}%`;
+          document.getElementById('stu-risk-prob').innerText = `${Math.round(data.probability_at_risk*100)}%`;
+          document.getElementById('stu-risk-label').innerText = `Model Assessment: ${data.label}`;
+          document.getElementById('stu-att-status').innerText = `Status: ${data.predicted_risk === 1 ? '⚠️ At Risk' : '✅ Normal'}`;
+        }
+      });
+    }
+
+    // ----------------------------------------------------------------------
+    // AI Advisor API Call
+    // ----------------------------------------------------------------------
+    function runAIAdvisor(e) {
+      e.preventDefault();
+      const statusEl = document.getElementById('ai-status');
+      const contentEl = document.getElementById('ai-plan-content');
+      statusEl.innerHTML = '<span style="color:var(--accent-cyan)">⚡ Generating Gemini AI Schedule...</span>';
+
+      const payload = {
+        roll_number: LOGGED_STUDENT ? LOGGED_STUDENT.roll_number : '101',
+        student_name: LOGGED_STUDENT ? LOGGED_STUDENT.name : 'Student',
+        target_percentage: parseFloat(document.getElementById('ai-target-pct').value),
+        weak_subjects: document.getElementById('ai-weak-subjects').value,
+        daily_hours: parseFloat(document.getElementById('ai-daily-hours').value)
+      };
+
+      fetch('/api/ai/advisor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          statusEl.innerHTML = '<span style="color:var(--accent-emerald)">✅ AI Plan generated!</span>';
+          document.getElementById('ai-plan-source').innerText = data.source;
+          contentEl.innerHTML = typeof marked !== 'undefined' ? marked.parse(data.plan_text) : data.plan_text.replace(/\n/g, '<br>');
+          showToast('AI Plan Ready', 'Personalized schedule generated.', 'success');
+        }
+      });
+    }
+
+    // ----------------------------------------------------------------------
+    // Notifications Drawer
+    // ----------------------------------------------------------------------
+    function loadNotifications() {
+      const role = CURRENT_ROLE;
+      const roll = LOGGED_STUDENT ? LOGGED_STUDENT.roll_number : '';
+
+      fetch(`/api/notifications?role=${role}&roll_number=${roll}`)
+        .then(res => res.json())
+        .then(list => {
+          const badge = document.getElementById('notif-badge-count');
+          const unread = list.filter(n => n.is_read === 0).length;
+          if (unread > 0) {
+            badge.innerText = unread;
+            badge.style.display = 'inline-block';
+          } else {
+            badge.style.display = 'none';
+          }
+
+          const drawerBody = document.getElementById('notif-list-body');
+          if (!list.length) {
+            drawerBody.innerHTML = '<div style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No new notifications.</div>';
+            return;
+          }
+
+          drawerBody.innerHTML = list.map(n => `
+            <div class="notif-item ${n.is_read ? '' : 'unread'}">
+              <div style="font-weight:700; font-size:0.88rem; color:${n.risk_level === 'critical' ? 'var(--accent-rose)' : 'var(--accent-amber)'}">
+                ${n.title}
+              </div>
+              <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.3rem;">
+                ${n.message}
+              </div>
+              <div style="font-size:0.7rem; color:var(--text-dim); margin-top:0.3rem; text-align:right;">
+                ${n.created_at || ''}
+              </div>
+            </div>
+          `).join('');
+
+          const stuNotifContainer = document.getElementById('stu-notif-container');
+          if (stuNotifContainer) {
+            stuNotifContainer.innerHTML = list.map(n => `
+              <div class="glass-card" style="margin-bottom:1rem; border-left:4px solid var(--accent-rose);">
+                <h4>${n.title}</h4>
+                <p style="font-size:0.88rem; color:var(--text-muted); margin-top:0.4rem;">${n.message}</p>
+              </div>
+            `).join('');
+          }
+        });
+    }
+
+    function toggleNotifDrawer() { document.getElementById('notif-drawer').classList.toggle('open'); }
+    function markNotificationsRead() {
+      fetch('/api/notifications/mark_read', { method: 'POST' }).then(() => loadNotifications());
+    }
+
+    function generateRiskNotifications() {
+      fetch('/api/notifications/generate', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+          showToast('Risk Scanning Complete', data.message, 'success');
+          loadNotifications();
+        });
+    }
+
+    // ----------------------------------------------------------------------
+    // Student & Attendance Functions
+    // ----------------------------------------------------------------------
+    function registerStudent(e) {
+      e.preventDefault();
+      const payload = {
+        roll_number: document.getElementById('reg-roll').value,
+        name: document.getElementById('reg-name').value,
+        department: document.getElementById('reg-dept').value,
+        year: document.getElementById('reg-year').value,
+        section: document.getElementById('reg-section').value,
+        email: document.getElementById('reg-email').value
+      };
+
+      fetch('/api/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          showToast('Student Registered', `${payload.name} added successfully.`, 'success');
+          loadStudents();
+        } else {
+          showToast('Registration Error', data.message, 'critical');
+        }
+      });
+    }
+
+    function loadStudents() {
+      fetch('/api/students')
+        .then(res => res.json())
+        .then(students => {
+          const tbody = document.getElementById('student-table-body');
+          tbody.innerHTML = students.map(s => `
+            <tr>
+              <td><b>${s.roll_number}</b></td>
+              <td>${s.name}</td>
+              <td>${s.department}</td>
+              <td>${s.year}</td>
+              <td>${s.email}</td>
+              <td><span class="badge badge-info">${s.face_samples} samples</span></td>
+            </tr>
+          `).join('');
+        });
+    }
+
+    function markAttendance(e) {
+      e.preventDefault();
+      const payload = {
+        roll_number: document.getElementById('att-roll').value,
+        date: document.getElementById('att-date').value
+      };
+
+      fetch('/api/attendance/mark', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          showToast('Attendance Marked', `${payload.roll_number} marked present.`, 'success');
+          loadAttendanceLogs();
+        } else {
+          showToast('Attendance Error', data.message, 'critical');
+        }
+      });
+    }
+
+    function loadAttendanceLogs() {
+      fetch('/api/attendance')
+        .then(res => res.json())
+        .then(logs => {
+          const tbody = document.getElementById('attendance-table-body');
+          const dashTbody = document.getElementById('dash-attendance-table-body');
+
+          const html = logs.map(l => `
+            <tr>
+              <td>${l.date}</td>
+              <td>${l.time}</td>
+              <td><b>${l.roll_number}</b></td>
+              <td>${l.name}</td>
+              <td>${l.subject || 'General'}</td>
+              <td><span class="badge badge-success">${l.status}</span></td>
+            </tr>
+          `).join('');
+
+          if (tbody) tbody.innerHTML = html;
+          if (dashTbody) dashTbody.innerHTML = html;
+        });
+    }
+
+    function seedAttendance() {
+      fetch('/api/attendance/seed', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+          showToast('Demo Data Seeded', data.message, 'info');
+          loadAttendanceLogs();
+        });
+    }
+
+    // ----------------------------------------------------------------------
+    // Face Recognition & Webcam
+    // ----------------------------------------------------------------------
+    function populateStudentDropdown() {
+      fetch('/api/students')
+        .then(res => res.json())
+        .then(students => {
+          const sel = document.getElementById('face-student-select');
+          sel.innerHTML = '<option value="">-- Select Student --</option>' + 
+            students.map(s => `<option value="${s.roll_number}">${s.roll_number} - ${s.name}</option>`).join('');
+        });
+    }
+
+    function startWebcam(mode) {
+      const videoId = mode === 'face' ? 'face-webcam' : 'rec-webcam';
+      const video = document.getElementById(videoId);
+
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ video: true })
+          .then(stream => {
+            WEBCAM_STREAM = stream;
+            video.srcObject = stream;
+          })
+          .catch(err => {
+            showToast('Webcam Error', err.message, 'critical');
+          });
+      }
+    }
+
+    function captureFaceSample() {
+      const roll = document.getElementById('face-student-select').value;
+      if (!roll) { showToast('Warning', 'Select a student first.', 'critical'); return; }
+
+      const video = document.getElementById('face-webcam');
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+
+      const dataUrl = canvas.toDataURL('image/jpeg');
+
+      fetch('/api/face_collect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roll_number: roll, image: dataUrl })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          showToast('Sample Captured', `Saved face sample #${data.sample_count}`, 'success');
+        } else {
+          showToast('Sample Error', data.message, 'critical');
+        }
+      });
+    }
+
+    function scanFaceFrame() {
+      const video = document.getElementById('rec-webcam');
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      const dataUrl = canvas.toDataURL('image/jpeg');
+
+      fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl })
+      })
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('rec-output').innerText = JSON.stringify(data, null, 2);
+        showToast('Face Scan Complete', 'Identity match processing.', 'info');
+      });
+    }
+
+    // ----------------------------------------------------------------------
+    // ML Analytics & Fitting Concepts
+    // ----------------------------------------------------------------------
+    function runMLPipeline() {
+      const logEl = document.getElementById('ml-log-output');
+      logEl.innerText = "Running full ML pipeline (preprocessing -> feature engineering -> RF + XGBoost training -> fitting evaluation)...";
+
+      fetch('/api/ml/train', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === 'success') {
+            logEl.innerText = data.log;
+            loadMLMetrics();
+            loadMLFittingConcepts();
+            showToast('ML Training Complete', 'Models & Fitting diagnostics updated.', 'success');
+          } else {
+            logEl.innerText = "Error: " + data.message + "\n\nLog:\n" + data.log;
+          }
+        });
+    }
+
+    function loadMLMetrics() {
+      fetch('/api/ml/metrics')
+        .then(res => res.json())
+        .then(rows => {
+          const tbody = document.getElementById('ml-metrics-table-body');
+          if (!rows.length) return;
+          tbody.innerHTML = rows.map(r => `
+            <tr>
+              <td><b>${r.model_name.toUpperCase()}</b></td>
+              <td>${(r.accuracy*100).toFixed(1)}%</td>
+              <td>${(r.precision_score*100).toFixed(1)}%</td>
+              <td>${(r.recall_score*100).toFixed(1)}%</td>
+              <td><span class="badge badge-risk">${(r.recall_at_risk*100).toFixed(1)}%</span></td>
+              <td>${(r.f1_score*100).toFixed(1)}%</td>
+            </tr>
+          `).join('');
+        });
+
+      loadMLFittingConcepts();
+    }
+
+    function loadMLFittingConcepts() {
+      fetch('/api/ml/fitting')
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === 'success' && data.fitting_concepts) {
+            const fit = data.fitting_concepts;
+            if (fit.underfitting) {
+              document.getElementById('fit-underfit-scores').innerText = `Train Acc: ${(fit.underfitting.train_accuracy*100).toFixed(1)}% | Test Acc: ${(fit.underfitting.test_accuracy*100).toFixed(1)}%`;
+            }
+            if (fit.overfitting) {
+              document.getElementById('fit-overfit-scores').innerText = `Train Acc: ${(fit.overfitting.train_accuracy*100).toFixed(1)}% | Test Acc: ${(fit.overfitting.test_accuracy*100).toFixed(1)}%`;
+            }
+            if (fit.good_fitting) {
+              document.getElementById('fit-goodfit-scores').innerText = `Train Acc: ${(fit.good_fitting.train_accuracy*100).toFixed(1)}% | Test Acc: ${(fit.good_fitting.test_accuracy*100).toFixed(1)}%`;
+            }
+          }
+        });
+    }
+  </script>
+</body>
+</html>

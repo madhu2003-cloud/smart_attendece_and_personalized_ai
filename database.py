@@ -1,18 +1,30 @@
 """SQLite database layer for Smart Attendance AI.
 
-Schema follows the project specification:
-
-  students   - roll_number, name, department, year, section, email
-  attendance - roll_number, date, time, status (one record per student per day)
-  face_samples - face images collected per student (webcam capture module)
-  model_metrics - evaluation results for the attendance-risk ML models (RF / XGBoost)
-  face_model_metrics - evaluation results for the face-recognition benchmark models
+Schema aligned with project requirements:
+  users       - id, role (student/faculty), username/roll_number, name, password, email, phone, subject, department, year, section
+  students    - id, roll_number (STU...), name, department, year, section, email, phone, password
+  attendance  - id, roll_number, subject, date, time, status, source
+  notifications - id, sender_faculty, recipient_roll, student_name, subject, title, message, risk_level, is_read, created_at
+  face_samples - id, roll_number, image_path, captured_at
+  model_metrics - evaluation results for attendance-risk ML models
+  face_model_metrics - evaluation results for face-recognition benchmark models
 """
 
 import os
+import re
 import sqlite3
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'attendance.db')
+
+
+def format_roll_number(raw_val):
+    """Normalize student roll numbers consistently to uppercase alphanumeric with STU prefix."""
+    clean = re.sub(r'[^A-Za-z0-9]', '', (raw_val or '').strip().upper())
+    if not clean:
+        return 'STU101'
+    if not clean.startswith('STU'):
+        clean = 'STU' + clean
+    return clean
 
 
 def get_db():
@@ -27,32 +39,52 @@ def init_db():
     conn = get_db()
     cur = conn.cursor()
 
+    # Unified Users table for Authentication (Faculty & Student)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            role        TEXT NOT NULL,               -- 'student' | 'faculty'
+            username    TEXT UNIQUE NOT NULL,        -- roll_number for student (STU...), name/id for faculty
+            name        TEXT NOT NULL,
+            password    TEXT NOT NULL,
+            email       TEXT NOT NULL,
+            phone       TEXT,
+            subject     TEXT DEFAULT 'Machine Learning & AI', -- For faculty
+            department  TEXT DEFAULT 'CSE',
+            year        TEXT DEFAULT '3rd',
+            section     TEXT DEFAULT 'A',
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Students master registry (roll_number MUST start with STU followed by digits)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS students (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             roll_number TEXT UNIQUE NOT NULL,
             name        TEXT NOT NULL,
-            department  TEXT NOT NULL,
-            year        TEXT NOT NULL,
-            section     TEXT NOT NULL,
+            department  TEXT NOT NULL DEFAULT 'CSE',
+            year        TEXT NOT NULL DEFAULT '3rd',
+            section     TEXT NOT NULL DEFAULT 'A',
             email       TEXT NOT NULL,
+            phone       TEXT DEFAULT '9876543210',
+            password    TEXT DEFAULT 'student123',
             created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # One attendance row per student per day. The UNIQUE(roll_number, date)
-    # constraint enforces "prevent the same student from being marked present
-    # multiple times on the same day" at the database level.
+    # Attendance log with Subject isolation
     cur.execute("""
         CREATE TABLE IF NOT EXISTS attendance (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             roll_number TEXT NOT NULL,
+            subject     TEXT NOT NULL DEFAULT 'Machine Learning & AI',
             date        TEXT NOT NULL,          -- YYYY-MM-DD
             time        TEXT NOT NULL,          -- HH:MM:SS
             status      TEXT NOT NULL DEFAULT 'Present',
-            source      TEXT NOT NULL DEFAULT 'manual',  -- manual | sample
+            source      TEXT NOT NULL DEFAULT 'manual',  -- manual | sample | face_ai
             FOREIGN KEY (roll_number) REFERENCES students(roll_number),
-            UNIQUE (roll_number, date)
+            UNIQUE (roll_number, subject, date)
         )
     """)
 
@@ -66,8 +98,7 @@ def init_db():
         )
     """)
 
-    # Evaluation results for the attendance-risk ML models.
-    # confusion_matrix / classification_report / feature_importance are JSON strings.
+    # Evaluation results for attendance-risk ML models (realistic metrics)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS model_metrics (
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,7 +115,7 @@ def init_db():
         )
     """)
 
-    # Evaluation results for the face-recognition benchmark models (LFW-trained).
+    # Evaluation results for face-recognition benchmark models (LFW-trained)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS face_model_metrics (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,45 +129,99 @@ def init_db():
         )
     """)
 
-    # Notifications table for Faculty and Students
+    # Targeted Notifications table for Faculty-to-Student Communication
     cur.execute("""
         CREATE TABLE IF NOT EXISTS notifications (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            role         TEXT NOT NULL,               -- 'faculty' | 'student'
-            roll_number  TEXT,                        -- Student roll number (if student notification)
-            student_name TEXT,                        -- Student name
-            subject      TEXT DEFAULT 'General',      -- Subject affected
-            title        TEXT NOT NULL,
-            message      TEXT NOT NULL,
-            risk_level   TEXT NOT NULL DEFAULT 'warning', -- 'info' | 'warning' | 'critical'
-            is_read      INTEGER DEFAULT 0,
-            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_faculty TEXT NOT NULL,
+            recipient_roll TEXT NOT NULL,              -- STU101 format
+            student_name   TEXT NOT NULL,
+            subject        TEXT NOT NULL,
+            title          TEXT NOT NULL,
+            message        TEXT NOT NULL,
+            risk_level     TEXT NOT NULL DEFAULT 'warning', -- 'info' | 'warning' | 'critical'
+            is_read        INTEGER DEFAULT 0,
+            created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Attempt to alter existing tables for extra columns if they don't exist
-    try:
-        cur.execute("ALTER TABLE students ADD COLUMN password TEXT DEFAULT '123456'")
-    except Exception:
-        pass
-
-    try:
-        cur.execute("ALTER TABLE attendance ADD COLUMN subject TEXT DEFAULT 'General'")
-    except Exception:
-        pass
-
     conn.commit()
+
+    # Seed default users & students if empty
+    seed_initial_data(conn)
+
     conn.close()
 
 
-def rebuild_db():
-    """Drop every table and recreate the schema from scratch.
+def seed_initial_data(conn):
+    """Seed initial faculty and STU-formatted student accounts."""
+    cur = conn.cursor()
+    
+    # Check if faculty exists
+    fac_count = cur.execute("SELECT COUNT(*) FROM users WHERE role='faculty'").fetchone()[0]
+    if fac_count == 0:
+        cur.execute("""
+            INSERT INTO users (role, username, name, password, email, phone, subject, department)
+            VALUES ('faculty', 'Prof. Vance', 'Prof. Robert Vance', 'faculty123', 'vance@university.edu', '9876500001', 'Machine Learning & AI', 'CSE')
+        """)
+        cur.execute("""
+            INSERT INTO users (role, username, name, password, email, phone, subject, department)
+            VALUES ('faculty', 'Dr. Sarah Jenkins', 'Dr. Sarah Jenkins', 'faculty123', 'sjenkins@university.edu', '9876500002', 'Database Systems', 'CSE')
+        """)
+        cur.execute("""
+            INSERT INTO users (role, username, name, password, email, phone, subject, department)
+            VALUES ('faculty', 'Prof. Alan Turing', 'Prof. Alan Turing', 'faculty123', 'aturing@university.edu', '9876500003', 'Data Structures', 'CSE')
+        """)
 
-    Used to wipe the previous demo schema and start clean.
-    """
+    # Seed initial STU students
+    stu_count = cur.execute("SELECT COUNT(*) FROM students").fetchone()[0]
+    if stu_count == 0:
+        initial_students = [
+            ('STU101', 'Aarav Sharma', 'CSE', '3rd', 'A', 'aarav.stu101@university.edu', '9876510001', 'student123'),
+            ('STU102', 'Priya Patel', 'CSE', '3rd', 'A', 'priya.stu102@university.edu', '9876510002', 'student123'),
+            ('STU103', 'Rahul Verma', 'ECE', '2nd', 'B', 'rahul.stu103@university.edu', '9876510003', 'student123'),
+            ('STU104', 'Sneha Reddy', 'CSE', '3rd', 'A', 'sneha.stu104@university.edu', '9876510004', 'student123'),
+            ('STU105', 'Vikram Malhotra', 'IT', '4th', 'C', 'vikram.stu105@university.edu', '9876510005', 'student123'),
+            ('STU106', 'Ananya Gupta', 'CSE', '3rd', 'B', 'ananya.stu106@university.edu', '9876510006', 'student123'),
+            ('STU107', 'Karan Joshi', 'MECH', '3rd', 'A', 'karan.stu107@university.edu', '9876510007', 'student123'),
+            ('STU108', 'Riya Sen', 'CSE', '3rd', 'A', 'riya.stu108@university.edu', '9876510008', 'student123'),
+        ]
+        for roll, name, dept, year, sec, email, phone, pwd in initial_students:
+            cur.execute("""
+                INSERT OR IGNORE INTO students (roll_number, name, department, year, section, email, phone, password)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (roll, name, dept, year, sec, email, phone, pwd))
+            cur.execute("""
+                INSERT OR IGNORE INTO users (role, username, name, password, email, phone, department, year, section)
+                VALUES ('student', ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (roll, name, pwd, email, phone, dept, year, sec))
+
+    # Seed sample notifications
+    notif_count = cur.execute("SELECT COUNT(*) FROM notifications").fetchone()[0]
+    if notif_count == 0:
+        cur.execute("""
+            INSERT INTO notifications (sender_faculty, recipient_roll, student_name, subject, title, message, risk_level)
+            VALUES ('Prof. Vance', 'STU101', 'Aarav Sharma', 'Machine Learning & AI',
+                    'Low Attendance Notice',
+                    'Your attendance in Machine Learning & AI is currently 64.5%, which is below the 75% requirement. Please attend all upcoming classes.',
+                    'warning')
+        """)
+        cur.execute("""
+            INSERT INTO notifications (sender_faculty, recipient_roll, student_name, subject, title, message, risk_level)
+            VALUES ('Dr. Sarah Jenkins', 'STU103', 'Rahul Verma', 'Database Systems',
+                    'Critical Attendance Alert',
+                    'Attendance in Database Systems is 58.0%. Medical certificate or attendance recovery required before lab exams.',
+                    'critical')
+        """)
+
+    conn.commit()
+
+
+def rebuild_db():
+    """Drop every table and recreate the schema from scratch."""
     conn = get_db()
     cur = conn.cursor()
-    for table in ('students', 'attendance', 'face_samples',
+    for table in ('users', 'students', 'attendance', 'face_samples',
                   'model_metrics', 'face_model_metrics', 'notifications'):
         cur.execute(f"DROP TABLE IF EXISTS {table}")
     conn.commit()
@@ -146,4 +231,4 @@ def rebuild_db():
 
 if __name__ == '__main__':
     rebuild_db()
-    print("Database rebuilt with the spec-aligned schema.")
+    print("Database rebuilt with STU authentication, user roles, subject isolation, and targeted notifications.")

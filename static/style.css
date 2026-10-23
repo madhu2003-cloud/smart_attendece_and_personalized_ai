@@ -547,8 +547,56 @@ tr:hover td { background: rgba(255, 255, 255, 0.03); }
 .role-tab-btn { flex: 1; background: transparent; border: none; color: var(--text-muted); padding: 0.6rem; font-size: 0.88rem; font-weight: 600; border-radius: 10px; cursor: pointer; }
 .role-tab-btn.active { background: var(--accent-indigo); color: white; }
 
-/* SVG Circular Gauge */
 .circular-chart { display: block; margin: 10px auto; max-width: 80%; max-height: 220px; }
 .circle-bg { fill: none; stroke: rgba(255, 255, 255, 0.08); stroke-width: 3.8; }
 .circle { fill: none; stroke-width: 3.8; stroke-linecap: round; transition: stroke-dasharray 0.6s ease; }
 .percentage { fill: var(--text-main); font-family: sans-serif; font-size: 0.5em; text-anchor: middle; font-weight: 800; }
+
+/* ==================== IMPROVED TABLE ROWS ==================== */
+tbody tr {
+  transition: background 0.18s ease, transform 0.15s ease;
+}
+tbody tr:hover {
+  background: rgba(99, 102, 241, 0.08) !important;
+  transform: translateX(2px);
+}
+
+/* ==================== LOADING SPINNER ==================== */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block;
+  width: 20px; height: 20px;
+  border: 2.5px solid rgba(255,255,255,0.15);
+  border-top-color: var(--accent-cyan);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+/* ==================== IMPROVED SCROLLBARS ==================== */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); border-radius: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.4); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.7); }
+
+/* ==================== SEARCH INPUT FOCUS GLOW ==================== */
+input[type="text"]:focus, input[type="email"]:focus,
+input[type="date"]:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent-indigo) !important;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+/* ==================== STAT CARD HOVER LIFT ==================== */
+.stat-card {
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+.stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(99,102,241,0.3);
+}
+
+/* ==================== BUTTON ACTIVE PRESS ==================== */
+.btn:active { transform: scale(0.97); }

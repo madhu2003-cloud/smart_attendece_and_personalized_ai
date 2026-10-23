@@ -19,11 +19,11 @@ import os
 import json
 import pickle
 
+import warnings
 import numpy as np
-if not hasattr(np, 'long'):
-    np.long = int
-if not hasattr(np, 'ulong'):
-    np.ulong = int
+# Suppress FutureWarning about np.long/np.ulong removed in NumPy 2.x
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*np\\.long.*")
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*np\\.ulong.*")
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')  # headless backend; no display needed
@@ -83,10 +83,21 @@ FEATURES_PATH = os.path.join(MODEL_DIR, 'attendance_feature_columns.pkl')
 # Preprocessing steps (each one returns a short human-readable summary)
 # --------------------------------------------------------------------------
 
+UCI_CSV_PATH = os.path.join(DATA_DIR, 'student-mat.csv')
+
 def load_dataset():
-    """Step 1-3: load CSV, show shape and column names."""
+    """Step 1-3: load CSV (UCI Student Performance dataset from Slide 6 if present, or fallback to attendance_dataset.csv)."""
+    if os.path.exists(UCI_CSV_PATH):
+        df = pd.read_csv(UCI_CSV_PATH)
+        # Process UCI Student Performance dataset (Slide 6 & 10)
+        if 'attendance_risk' not in df.columns:
+            abs_median = df['absences'].median()
+            g3_median = df['G3'].median()
+            df['attendance_risk'] = ((df['absences'] > abs_median) & (df['G3'] < g3_median)).astype(int)
+        df['roll_number'] = [f"UCI-{100+i}" for i in range(len(df))]
+        df['name'] = [f"Student {i+1}" for i in range(len(df))]
+        return df
     df = pd.read_csv(CSV_PATH)
-    # pandas infers roll numbers as int; they are identifiers, not numbers.
     df['roll_number'] = df['roll_number'].astype(str)
     return df
 
@@ -105,18 +116,17 @@ def clean(df):
     notes = []
     n_before = len(df)
 
-    # 6. Missing values: this synthetic dataset should have none, but handle
-    #    them anyway so the pipeline works with real data later.
     missing_cols = df.columns[df.isnull().any()].tolist()
     if missing_cols:
-        notes.append(f"Filled {df.isnull().sum().sum()} missing values "
-                     f"in {missing_cols} with column medians.")
+        notes.append(f"Filled {df.isnull().sum().sum()} missing values in {missing_cols}.")
         for col in missing_cols:
-            df[col] = df[col].fillna(df[col].median())
+            if df[col].dtype in ['int64', 'float64']:
+                df[col] = df[col].fillna(df[col].median())
+            else:
+                df[col] = df[col].fillna(df[col].mode()[0])
     else:
-        notes.append("No missing values found - nothing to fill.")
+        notes.append("No missing values found - data clean.")
 
-    # 7. Duplicate records.
     n_dup = int(df.duplicated().sum())
     if n_dup:
         df = df.drop_duplicates().reset_index(drop=True)
@@ -124,46 +134,34 @@ def clean(df):
     else:
         notes.append("No duplicate rows found.")
 
-    # 8. Invalid values: percentages must be in [0, 100]; counts non-negative.
-    for col in ['attendance_percentage', 'absence_percentage',
-                'attendance_last_7_days', 'attendance_last_30_days',
-                'previous_semester_percentage']:
-        bad = df[(df[col] < 0) | (df[col] > 100)]
-        if len(bad):
-            notes.append(f"Clamped {len(bad)} out-of-range values in {col}.")
-            df.loc[df[col] < 0, col] = 0
-            df.loc[df[col] > 100, col] = 100
-    for col in ['total_classes', 'classes_attended', 'classes_absent',
-                'consecutive_absences', 'number_of_late_arrivals']:
-        bad = df[df[col] < 0]
-        if len(bad):
-            notes.append(f"Removed {len(bad)} rows with negative {col}.")
-            df = df[df[col] >= 0].reset_index(drop=True)
-
     notes.append(f"Rows before cleaning: {n_before}, after: {len(df)}")
     return df, "\n".join(notes)
 
 
 def engineer_features(df):
-    """Step: feature engineering.
-
-    attendance_gap        = attendance_percentage - previous_semester_percentage
-                          Captures whether the student's attendance is trending
-                          up or down versus last semester. A student who is
-                          dropping sharply is more likely to become at risk.
-
-    avg_academic_score    = mean(assignment_score, internal_marks)
-                          A single summary of current academic standing, so the
-                          model can weigh it together with attendance.
+    """Step: feature engineering (Slide 7 composite metrics).
+    - Study Efficiency = (G1 + G2 + G3) / (studytime + 1)
+    - Total Support = sum of schoolsup + famsup + paid flags
+    - Attendance Gap / Avg Academic Score (fallback columns)
     """
-    df['attendance_gap'] = df['attendance_percentage'] - df['previous_semester_percentage']
-    df['avg_academic_score'] = df[['assignment_score', 'internal_marks']].mean(axis=1)
+    if 'G1' in df.columns and 'G2' in df.columns and 'G3' in df.columns and 'studytime' in df.columns:
+        df['study_efficiency'] = (df['G1'] + df['G2'] + df['G3']) / (df['studytime'] + 1)
+    if 'schoolsup' in df.columns and 'famsup' in df.columns and 'paid' in df.columns:
+        df['total_support'] = ((df['schoolsup'] == 'yes').astype(int) + 
+                               (df['famsup'] == 'yes').astype(int) + 
+                               (df['paid'] == 'yes').astype(int))
+    if 'attendance_percentage' in df.columns and 'previous_semester_percentage' in df.columns:
+        df['attendance_gap'] = df['attendance_percentage'] - df['previous_semester_percentage']
+    if 'assignment_score' in df.columns and 'internal_marks' in df.columns:
+        df['avg_academic_score'] = df[['assignment_score', 'internal_marks']].mean(axis=1)
     return df
 
 
 def encode_categoricals(df):
-    """Step 9-10: one-hot encode categorical variables for the models."""
-    df = pd.get_dummies(df, columns=CATEGORICAL_FEATURES, dtype=int)
+    """Step 9-10: encode categorical variables for the models."""
+    obj_cols = df.select_dtypes(include=['object', 'string', 'category']).columns.tolist()
+    obj_cols = [c for c in obj_cols if c not in IDENTIFIER_COLS]
+    df = pd.get_dummies(df, columns=obj_cols, dtype=int)
     return df
 
 
@@ -174,10 +172,13 @@ def check_class_distribution(y):
 
 
 def select_features(df):
-    """Step 11: separate identifiers from features and target.
-
-    Returns (X, y, feature_columns)."""
-    X = df.drop(columns=IDENTIFIER_COLS + [TARGET], errors='ignore')
+    """Step 11: separate identifiers & target-leakage columns from features and target.
+    Note: G3 is used to define the target 'attendance_risk' (Slide 10).
+    Including G3 in predictor features X causes Target Leakage (100% artificial accuracy).
+    We drop G3 from X so models predict risk realistically from attendance & prior features.
+    """
+    leakage_cols = ['G3'] if 'G3' in df.columns else []
+    X = df.drop(columns=IDENTIFIER_COLS + [TARGET] + leakage_cols, errors='ignore')
     y = df[TARGET]
     return X, y, list(X.columns)
 
@@ -198,75 +199,41 @@ def make_plots(df):
         plt.close(fig)
         plots.append(name)
 
-    # 1. Attendance distribution histogram
+    # 1. Attendance / Absence distribution histogram
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.hist(df['attendance_percentage'], bins=20, color='#06b6d4', edgecolor='white')
-    ax.axvline(72, color='#f59e0b', linestyle='--', label='at-risk threshold (72%)')
-    ax.set_title('Attendance percentage distribution')
-    ax.set_xlabel('Attendance %')
+    if 'attendance_percentage' in df.columns:
+        ax.hist(df['attendance_percentage'], bins=20, color='#06b6d4', edgecolor='white')
+        ax.axvline(72, color='#f59e0b', linestyle='--', label='at-risk threshold (72%)')
+        ax.set_title('Attendance percentage distribution')
+        ax.set_xlabel('Attendance %')
+    elif 'absences' in df.columns:
+        ax.hist(df['absences'], bins=20, color='#06b6d4', edgecolor='white')
+        ax.axvline(df['absences'].median(), color='#f59e0b', linestyle='--', label=f"median ({df['absences'].median()})")
+        ax.set_title('Student Absence Count Distribution (UCI Dataset)')
+        ax.set_xlabel('Absences')
     ax.set_ylabel('Students')
     ax.legend()
     save(fig, 'attendance_histogram.png')
 
-    # 2. Attendance category bar chart (buckets)
-    bins = [0, 60, 70, 80, 90, 100]
-    labels = ['<60', '60-70', '70-80', '80-90', '90-100']
-    cats = pd.cut(df['attendance_percentage'], bins=bins, labels=labels, right=True)
+    # 2. Category bar chart
     fig, ax = plt.subplots(figsize=(8, 4))
-    cats.value_counts().sort_index().plot(kind='bar', ax=ax, color='#8b5cf6')
-    ax.set_title('Students by attendance category')
-    ax.set_xlabel('Attendance %')
+    if 'attendance_percentage' in df.columns:
+        bins = [0, 60, 70, 80, 90, 100]
+        labels = ['<60', '60-70', '70-80', '80-90', '90-100']
+        cats = pd.cut(df['attendance_percentage'], bins=bins, labels=labels, right=True)
+        cats.value_counts().sort_index().plot(kind='bar', ax=ax, color='#8b5cf6')
+        ax.set_title('Students by attendance category')
+    elif 'G3' in df.columns:
+        bins = [-1, 5, 10, 15, 20]
+        labels = ['0-5 (Fail)', '6-10 (Low)', '11-15 (Good)', '16-20 (Exec)']
+        cats = pd.cut(df['G3'], bins=bins, labels=labels, right=True)
+        cats.value_counts().sort_index().plot(kind='bar', ax=ax, color='#8b5cf6')
+        ax.set_title('Students by Grade G3 Category (UCI Dataset)')
     ax.set_ylabel('Students')
     ax.tick_params(axis='x', rotation=0)
     save(fig, 'attendance_categories.png')
 
-    # 3. Present vs absent counts (aggregated over the dataset)
-    present = int(df['classes_attended'].sum())
-    absent = int(df['classes_absent'].sum())
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(['Present', 'Absent'], [present, absent], color=['#10b981', '#ef4444'])
-    ax.set_title('Total present vs absent class-days')
-    ax.set_ylabel('Class-days')
-    for i, v in enumerate([present, absent]):
-        ax.text(i, v + 200, f'{v:,}', ha='center')
-    save(fig, 'present_vs_absent.png')
-
-    # 4. Department-wise mean attendance
-    fig, ax = plt.subplots(figsize=(8, 4))
-    df.groupby('department')['attendance_percentage'].mean().sort_values().plot(
-        kind='barh', ax=ax, color='#06b6d4')
-    ax.set_title('Mean attendance by department')
-    ax.set_xlabel('Mean attendance %')
-    save(fig, 'department_attendance.png')
-
-    # 5. Year-wise mean attendance
-    fig, ax = plt.subplots(figsize=(8, 4))
-    df.groupby('year')['attendance_percentage'].mean().sort_index().plot(
-        kind='bar', ax=ax, color='#3b82f6')
-    ax.set_title('Mean attendance by year')
-    ax.set_ylabel('Mean attendance %')
-    ax.tick_params(axis='x', rotation=0)
-    save(fig, 'year_attendance.png')
-
-    # 6. Section-wise mean attendance
-    fig, ax = plt.subplots(figsize=(6, 4))
-    df.groupby('section')['attendance_percentage'].mean().sort_index().plot(
-        kind='bar', ax=ax, color='#f59e0b')
-    ax.set_title('Mean attendance by section')
-    ax.set_ylabel('Mean attendance %')
-    ax.tick_params(axis='x', rotation=0)
-    save(fig, 'section_attendance.png')
-
-    # 7. Attendance vs academic performance (scatter)
-    fig, ax = plt.subplots(figsize=(7, 5))
-    ax.scatter(df['attendance_percentage'], df['internal_marks'],
-               c=df[TARGET], cmap='coolwarm', alpha=0.6, s=18)
-    ax.set_title('Attendance vs internal marks (colored by risk)')
-    ax.set_xlabel('Attendance %')
-    ax.set_ylabel('Internal marks')
-    save(fig, 'attendance_vs_marks.png')
-
-    # 8. Correlation heatmap (the most important mid-review visualization)
+    # 3. Correlation heatmap
     fig, ax = plt.subplots(figsize=(13, 10))
     corr = df.corr(numeric_only=True)
     sns.heatmap(corr, annot=True, fmt='.2f', cmap='coolwarm',
@@ -274,7 +241,7 @@ def make_plots(df):
     ax.set_title('Feature correlation heatmap')
     save(fig, 'correlation_heatmap.png')
 
-    # 10. Risk category distribution
+    # 4. Risk category distribution
     fig, ax = plt.subplots(figsize=(6, 4))
     counts = df[TARGET].value_counts().sort_index()
     ax.bar(['Normal (0)', 'At Risk (1)'], counts.values, color=['#10b981', '#ef4444'])
@@ -291,21 +258,33 @@ def make_plots(df):
 # Training and evaluation
 # --------------------------------------------------------------------------
 
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+
+LR_PATH = os.path.join(MODEL_DIR, 'attendance_lr.pkl')
+
 def train_models(X, y):
-    """Step: train-test split, Random Forest and XGBoost, full evaluation."""
+    """Step: train-test split, Logistic Regression baseline, Random Forest, and XGBoost evaluation."""
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y)
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
 
     results = {
         'split': {'train': len(X_train), 'test': len(X_test),
                   'test_size': 0.2, 'random_state': 42},
     }
 
-    # --- Model 1: Random Forest ------------------------------------------
-    # An ensemble of many decision trees; predictions are combined by majority
-    # vote. Strong on tabular data, handles nonlinearity, no scaling needed,
-    # and exposes feature importances. class_weight='balanced' compensates for
-    # the imbalanced classes.
+    # --- Model 1: Logistic Regression Baseline (Slide 9 & 11) -------------
+    lr = LogisticRegression(class_weight='balanced', max_iter=1000, random_state=42)
+    lr.fit(X_train_scaled, y_train)
+    results['logistic_regression'] = evaluate(lr, X_test_scaled, y_test)
+    with open(LR_PATH, 'wb') as f:
+        pickle.dump(lr, f)
+
+    # --- Model 2: Random Forest (Slide 9 & 11) ---------------------------
     rf = RandomForestClassifier(n_estimators=200, random_state=42,
                                 class_weight='balanced')
     rf.fit(X_train, y_train)
@@ -313,10 +292,7 @@ def train_models(X, y):
     with open(RF_PATH, 'wb') as f:
         pickle.dump(rf, f)
 
-    # --- Model 2: XGBoost -------------------------------------------------
-    # Gradient boosting: builds trees sequentially, each new tree focuses on
-    # the errors of the previous ones. scale_pos_weight compensates for the
-    # minority (at-risk) class.
+    # --- Model 3: XGBoost -------------------------------------------------
     neg, pos = int((y == 0).sum()), int((y == 1).sum())
     xgb = XGBClassifier(n_estimators=200, max_depth=5, learning_rate=0.05,
                         random_state=42, eval_metric='logloss',
@@ -333,6 +309,7 @@ def train_models(X, y):
                      if 'class_distribution' in results else None}, f)
 
     # Feature-importance plots.
+    make_importance_plot(lr, X.columns, 'lr_feature_importance.png')
     make_importance_plot(rf, X.columns, 'rf_feature_importance.png')
     make_importance_plot(xgb, X.columns, 'xgb_feature_importance.png')
 
@@ -363,19 +340,30 @@ def evaluate(model, X_test, y_test):
     weighted['precision_at_risk'] = round(float(at_risk.get('precision', 0.0)), 4)
     weighted['confusion_matrix'] = cm.tolist()
     weighted['classification_report'] = report
-    weighted['feature_importance'] = dict(
-        zip(model.feature_names_in_.tolist()
-            if hasattr(model, 'feature_names_in_') else [],
-            [float(v) for v in model.feature_importances_]))
+    if hasattr(model, 'feature_importances_'):
+        importances = [float(v) for v in model.feature_importances_]
+    elif hasattr(model, 'coef_'):
+        importances = [float(v) for v in np.abs(model.coef_[0])]
+    else:
+        importances = []
+
+    feat_names = model.feature_names_in_.tolist() if hasattr(model, 'feature_names_in_') else []
+    weighted['feature_importance'] = dict(zip(feat_names, importances))
     return weighted
 
 
 def make_importance_plot(model, feature_names, filename):
-    imp = pd.Series(model.feature_importances_, index=feature_names).sort_values()
+    if hasattr(model, 'feature_importances_'):
+        vals = model.feature_importances_
+    elif hasattr(model, 'coef_'):
+        vals = np.abs(model.coef_[0])
+    else:
+        return
+    imp = pd.Series(vals, index=feature_names).sort_values()
     fig, ax = plt.subplots(figsize=(9, 6))
     imp.tail(15).plot(kind='barh', ax=ax, color='#06b6d4')
-    ax.set_title('Feature importance')
-    ax.set_xlabel('Importance')
+    ax.set_title('Feature Importance / Coefficients')
+    ax.set_xlabel('Importance / |Coefficient|')
     fig.tight_layout()
     fig.savefig(os.path.join(PLOT_DIR, filename), dpi=100, bbox_inches='tight')
     plt.close(fig)

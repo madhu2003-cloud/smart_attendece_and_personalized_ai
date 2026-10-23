@@ -397,32 +397,59 @@ def detect_and_recognize_frame(image_bytes, subject="Machine Learning & AI", stu
             name = target_student['name']
             samples = load_student_sample_descriptors(roll)
 
-            if len(samples) == 0:
+            # Check target student samples
+            target_score = 0.0
+            if samples:
+                scores = [compare_descriptors(live_desc, s) for s in samples]
+                target_score = max(scores)
+
+            # Cross-check against all other students to detect cross-account impersonation
+            other_best_student = None
+            other_best_score = 0.0
+            for st in all_students:
+                if st['roll_number'] == roll:
+                    continue
+                o_samples = load_student_sample_descriptors(st['roll_number'])
+                if o_samples:
+                    o_score = max([compare_descriptors(live_desc, s) for s in o_samples])
+                    if o_score > other_best_score:
+                        other_best_score = o_score
+                        other_best_student = st
+
+            matched = False
+            is_impersonation = False
+
+            if len(samples) == 0 and other_best_score < SIMILARITY_THRESHOLD:
                 conf = 0.0
-                matched = False
                 box_color = (0, 165, 255)  # Orange/Amber
                 status_txt = "NOT ENROLLED"
                 message = f"No face samples registered for {roll} ({name}). Please register your face sample first."
+            elif target_score >= SIMILARITY_THRESHOLD and target_score >= other_best_score:
+                # Genuine student match!
+                conf = round(target_score, 3)
+                matched = True
+                overall_match = True
+                box_color = (34, 197, 94)  # Emerald Green
+                status_txt = f"{roll} {name} ({conf*100:.1f}%)"
+                message = f"Face Matched! Identity verified as {roll} - {name} ({conf*100:.1f}%). Attendance marked Present."
+            elif other_best_student and other_best_score >= SIMILARITY_THRESHOLD and other_best_score > target_score:
+                # Cross-account mismatch / impersonation attempt
+                is_impersonation = True
+                conf = round(other_best_score, 3)
+                box_color = (59, 59, 239)  # Crimson Rose
+                detected_name = other_best_student['name']
+                detected_roll = other_best_student['roll_number']
+                status_txt = f"MISMATCH: {detected_roll}"
+                message = f"IDENTITY MISMATCH: Biometric scan detected you are {detected_name} ({detected_roll}, {conf*100:.1f}%), but you are in {name}'s account ({roll}). You cannot mark attendance for another student's account!"
             else:
-                # Compare against all enrolled samples for this student
-                scores = [compare_descriptors(live_desc, s) for s in samples]
-                best_score = max(scores)
-                conf = round(best_score, 3)
-                matched = (best_score >= SIMILARITY_THRESHOLD)
+                conf = round(target_score, 3)
+                box_color = (59, 59, 239)  # Crimson Rose
+                status_txt = f"MISMATCH ({conf*100:.1f}%)"
+                message = f"Biometric Verification Failed ({conf*100:.1f}%). Face does not match registered samples for {name} ({roll}). Attendance NOT marked."
 
-                if matched:
-                    box_color = (34, 197, 94)  # Emerald Green
-                    status_txt = f"{roll} {name} ({conf*100:.1f}%)"
-                    overall_match = True
-                    message = f"Face Matched! Identity verified as {roll} - {name} ({conf*100:.1f}%). Attendance marked Present."
-                else:
-                    box_color = (59, 59, 239)  # Crimson Rose
-                    status_txt = f"MISMATCH ({conf*100:.1f}%)"
-                    message = f"Face mismatch ({conf*100:.1f}%). Face does not match registered samples for {roll}. Attendance NOT marked."
-
-            # Mark attendance if matched
+            # Mark attendance ONLY if matched and NOT impersonating
             marked = False
-            if matched:
+            if matched and not is_impersonation:
                 try:
                     conn = get_db()
                     cur = conn.cursor()
@@ -452,10 +479,12 @@ def detect_and_recognize_frame(image_bytes, subject="Machine Learning & AI", stu
                 'landmarks': landmarks,
                 'roll_number': roll,
                 'student_name': name,
-                'predicted_identity': f"{roll} - {name}",
+                'predicted_identity': f"{roll} - {name}" if matched else (f"Detected: {other_best_student['roll_number']} - {other_best_student['name']}" if is_impersonation else "Unrecognized"),
                 'confidence': conf,
                 'confidence_pct': round(conf * 100, 1),
                 'match': matched,
+                'is_impersonation': is_impersonation,
+                'detected_other': other_best_student if is_impersonation else None,
                 'samples_count': len(samples),
                 'attendance_marked': marked
             })
@@ -541,10 +570,12 @@ def detect_and_recognize_frame(image_bytes, subject="Machine Learning & AI", stu
     annotated_b64 = base64.b64encode(buffer).decode('utf-8')
 
     top_res = results[0] if (overall_match and results) else (results[0] if results else {})
+    status_str = 'success' if overall_match else ('identity_mismatch' if any(r.get('is_impersonation') for r in results) else ('mismatch' if results and not overall_match else 'no_face'))
     return {
-        'status': 'success' if overall_match else ('mismatch' if results and not overall_match else 'no_face'),
+        'status': status_str,
         'faces_detected': len(faces),
         'match': overall_match,
+        'is_impersonation': any(r.get('is_impersonation') for r in results),
         'matched_identity': top_res.get('predicted_identity'),
         'student_name': top_res.get('student_name'),
         'roll_number': top_res.get('roll_number'),

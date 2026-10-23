@@ -508,7 +508,8 @@ def get_notifications():
     cur = conn.cursor()
 
     if roll:
-        cur.execute("SELECT * FROM notifications WHERE recipient_roll = ? ORDER BY created_at DESC", (format_roll_number(roll),))
+        formatted_roll = format_roll_number(roll)
+        cur.execute("SELECT * FROM notifications WHERE recipient_roll = ? OR recipient_roll = 'ALL' ORDER BY created_at DESC", (formatted_roll,))
     elif faculty:
         cur.execute("SELECT * FROM notifications WHERE sender_faculty LIKE ? ORDER BY created_at DESC", (f"%{faculty}%",))
     else:
@@ -524,8 +525,11 @@ def send_notification():
     data = request.json or request.form or {}
     sender = (data.get('sender_faculty') or 'Faculty Member').strip()
     raw_roll = (data.get('recipient_roll') or '').strip()
-    roll = format_roll_number(raw_roll)
-    student_name = (data.get('student_name') or roll).strip()
+    if raw_roll.upper() in ('ALL', 'BROADCAST'):
+        roll = 'ALL'
+    else:
+        roll = format_roll_number(raw_roll)
+    student_name = (data.get('student_name') or ('All Students' if roll == 'ALL' else roll)).strip()
     subject = (data.get('subject') or 'General').strip()
     title = (data.get('title') or 'Attendance Warning').strip()
     message = (data.get('message') or '').strip()
@@ -543,7 +547,80 @@ def send_notification():
     conn.commit()
     conn.close()
 
-    return jsonify({'status': 'success', 'message': f'Notification successfully sent to student {roll} ({student_name}).'})
+    target_label = "all students" if roll == "ALL" else f"student {roll} ({student_name})"
+    return jsonify({'status': 'success', 'message': f'Notification successfully dispatched to {target_label}.'})
+
+
+# --------------------------------------------------------------------------
+# Campus Geo-Fencing Module (Editable by Faculty ONLY)
+# --------------------------------------------------------------------------
+
+@app.route('/api/geofence', methods=['GET'])
+def get_geofence():
+    conn = get_db()
+    cur = conn.cursor()
+    row = cur.execute("SELECT * FROM geofence_settings WHERE id = 1").fetchone()
+    conn.close()
+    if row:
+        return jsonify(dict(row))
+    return jsonify({
+        'id': 1,
+        'campus_name': 'Main Engineering Campus',
+        'latitude': 17.385044,
+        'longitude': 78.486671,
+        'radius_meters': 250.0,
+        'is_enabled': 1,
+        'updated_by': 'Prof. Robert Vance'
+    })
+
+
+@app.route('/api/geofence/update', methods=['POST'])
+def update_geofence():
+    data = request.json or request.form or {}
+    role = (data.get('role') or '').lower().strip()
+    if role and role != 'faculty':
+        return jsonify({'status': 'error', 'message': 'Access Denied: Only faculty can modify campus geofence perimeter.'}), 403
+
+    campus_name = (data.get('campus_name') or 'Main Engineering Campus').strip()
+    try:
+        lat = float(data.get('latitude', 17.385044))
+        lng = float(data.get('longitude', 78.486671))
+        radius = float(data.get('radius_meters', 250.0))
+        is_enabled = 1 if str(data.get('is_enabled', '1')).lower() in ('1', 'true', 'yes') else 0
+    except (ValueError, TypeError):
+        return jsonify({'status': 'error', 'message': 'Invalid latitude, longitude, or radius.'}), 400
+
+    updated_by = (data.get('updated_by') or 'Faculty Member').strip()
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO geofence_settings (id, campus_name, latitude, longitude, radius_meters, is_enabled, updated_by, updated_at)
+        VALUES (1, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(id) DO UPDATE SET
+            campus_name = excluded.campus_name,
+            latitude = excluded.latitude,
+            longitude = excluded.longitude,
+            radius_meters = excluded.radius_meters,
+            is_enabled = excluded.is_enabled,
+            updated_by = excluded.updated_by,
+            updated_at = CURRENT_TIMESTAMP
+    """, (campus_name, lat, lng, radius, is_enabled, updated_by))
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'status': 'success',
+        'message': f'Campus geofence perimeter updated to {radius}m radius.',
+        'geofence': {
+            'campus_name': campus_name,
+            'latitude': lat,
+            'longitude': lng,
+            'radius_meters': radius,
+            'is_enabled': is_enabled,
+            'updated_by': updated_by
+        }
+    })
 
 
 # --------------------------------------------------------------------------

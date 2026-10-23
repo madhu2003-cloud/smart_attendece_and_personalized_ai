@@ -145,6 +145,25 @@ def init_db():
         )
     """)
 
+    # Campus Geo-Fencing configuration (Editable by Faculty ONLY)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS geofence_settings (
+            id            INTEGER PRIMARY KEY DEFAULT 1,
+            campus_name   TEXT NOT NULL DEFAULT 'Main Engineering Campus',
+            latitude      REAL NOT NULL DEFAULT 17.385044,
+            longitude     REAL NOT NULL DEFAULT 78.486671,
+            radius_meters REAL NOT NULL DEFAULT 250.0,
+            is_enabled    INTEGER NOT NULL DEFAULT 1,
+            updated_by    TEXT DEFAULT 'Prof. Robert Vance',
+            updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cur.execute("""
+        INSERT OR IGNORE INTO geofence_settings (id, campus_name, latitude, longitude, radius_meters, is_enabled, updated_by)
+        VALUES (1, 'Main Engineering Campus', 17.385044, 78.486671, 250.0, 1, 'Prof. Robert Vance')
+    """)
+
     conn.commit()
 
     # Seed default users & students if empty

@@ -21,7 +21,7 @@ def format_roll_number(raw_val):
     """Normalize student roll numbers consistently to uppercase alphanumeric with STU prefix."""
     clean = re.sub(r'[^A-Za-z0-9]', '', (raw_val or '').strip().upper())
     if not clean:
-        return 'STU101'
+        return ''
     if not clean.startswith('STU'):
         clean = 'STU' + clean
     return clean
@@ -173,7 +173,7 @@ def init_db():
 
 
 def seed_initial_data(conn):
-    """Seed initial faculty and STU-formatted student accounts."""
+    """Seed initial faculty accounts only. Zero inbuilt dummy student records."""
     cur = conn.cursor()
     
     # Check if faculty exists
@@ -190,47 +190,6 @@ def seed_initial_data(conn):
         cur.execute("""
             INSERT INTO users (role, username, name, password, email, phone, subject, department)
             VALUES ('faculty', 'Prof. Alan Turing', 'Prof. Alan Turing', 'faculty123', 'aturing@university.edu', '9876500003', 'Data Structures', 'CSE')
-        """)
-
-    # Seed initial STU students
-    stu_count = cur.execute("SELECT COUNT(*) FROM students").fetchone()[0]
-    if stu_count == 0:
-        initial_students = [
-            ('STU101', 'Aarav Sharma', 'CSE', '3rd', 'A', 'aarav.stu101@university.edu', '9876510001', 'student123'),
-            ('STU102', 'Priya Patel', 'CSE', '3rd', 'A', 'priya.stu102@university.edu', '9876510002', 'student123'),
-            ('STU103', 'Rahul Verma', 'ECE', '2nd', 'B', 'rahul.stu103@university.edu', '9876510003', 'student123'),
-            ('STU104', 'Sneha Reddy', 'CSE', '3rd', 'A', 'sneha.stu104@university.edu', '9876510004', 'student123'),
-            ('STU105', 'Vikram Malhotra', 'IT', '4th', 'C', 'vikram.stu105@university.edu', '9876510005', 'student123'),
-            ('STU106', 'Ananya Gupta', 'CSE', '3rd', 'B', 'ananya.stu106@university.edu', '9876510006', 'student123'),
-            ('STU107', 'Karan Joshi', 'MECH', '3rd', 'A', 'karan.stu107@university.edu', '9876510007', 'student123'),
-            ('STU108', 'Riya Sen', 'CSE', '3rd', 'A', 'riya.stu108@university.edu', '9876510008', 'student123'),
-        ]
-        for roll, name, dept, year, sec, email, phone, pwd in initial_students:
-            cur.execute("""
-                INSERT OR IGNORE INTO students (roll_number, name, department, year, section, email, phone, password)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (roll, name, dept, year, sec, email, phone, pwd))
-            cur.execute("""
-                INSERT OR IGNORE INTO users (role, username, name, password, email, phone, department, year, section)
-                VALUES ('student', ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (roll, name, pwd, email, phone, dept, year, sec))
-
-    # Seed sample notifications
-    notif_count = cur.execute("SELECT COUNT(*) FROM notifications").fetchone()[0]
-    if notif_count == 0:
-        cur.execute("""
-            INSERT INTO notifications (sender_faculty, recipient_roll, student_name, subject, title, message, risk_level)
-            VALUES ('Prof. Vance', 'STU101', 'Aarav Sharma', 'Machine Learning & AI',
-                    'Low Attendance Notice',
-                    'Your attendance in Machine Learning & AI is currently 64.5%, which is below the 75% requirement. Please attend all upcoming classes.',
-                    'warning')
-        """)
-        cur.execute("""
-            INSERT INTO notifications (sender_faculty, recipient_roll, student_name, subject, title, message, risk_level)
-            VALUES ('Dr. Sarah Jenkins', 'STU103', 'Rahul Verma', 'Database Systems',
-                    'Critical Attendance Alert',
-                    'Attendance in Database Systems is 58.0%. Medical certificate or attendance recovery required before lab exams.',
-                    'critical')
         """)
 
     conn.commit()

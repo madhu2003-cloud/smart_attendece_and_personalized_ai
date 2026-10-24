@@ -1645,10 +1645,10 @@
       <div class="bento-card card-hero-lime">
         <div class="hero-top">
           <div class="hero-user">
-            <div class="hero-avatar" id="hero-avatar-initials">MV</div>
+            <div class="hero-avatar" id="hero-avatar-initials">--</div>
             <div class="hero-user-details">
-              <h3 id="hero-user-name">m.vittal</h3>
-              <p id="hero-user-role">Student · STU33 · CSE</p>
+              <h3 id="hero-user-name">Smart Attendance AI</h3>
+              <p id="hero-user-role">Student & Faculty Portal</p>
             </div>
           </div>
           <div class="hero-top-actions">
@@ -1968,10 +1968,6 @@
               <label class="form-label" style="font-size: 0.74rem;">Target Recipient</label>
               <select id="fac-dispatch-recipient" class="form-input">
                 <option value="ALL">📢 All Students (Broadcast)</option>
-                <option value="STU101">STU101 - Aarav Sharma</option>
-                <option value="STU33">STU33 - m.vittal</option>
-                <option value="STU102">STU102 - Priya Patel</option>
-                <option value="STU103">STU103 - Rahul Verma</option>
               </select>
             </div>
             <div>
@@ -2141,7 +2137,7 @@
 
       <div class="form-group">
         <label class="form-label">Student Roll Number for Enrollment:</label>
-        <input type="text" id="reg-sample-roll-input" class="form-input" placeholder="e.g. STU33 or STU101">
+        <input type="text" id="reg-sample-roll-input" class="form-input" placeholder="e.g. STU101">
       </div>
 
       <div class="hud-viewport-box" style="height: 340px;">
@@ -2322,8 +2318,6 @@
           <label class="form-label">Recipient:</label>
           <select id="broadcast-recipient" class="form-input">
             <option value="ALL">📢 All Students in Class</option>
-            <option value="STU33">STU33 - m.vittal</option>
-            <option value="STU101">STU101 - Aarav Sharma</option>
           </select>
         </div>
 
@@ -2368,11 +2362,11 @@
       <form id="form-stu-auth" onsubmit="handleStudentLogin(event)">
         <div class="form-group">
           <label class="form-label">Student Roll Number</label>
-          <input type="text" id="auth-stu-roll" class="form-input" value="STU101" placeholder="e.g. STU101 or STU33" required>
+          <input type="text" id="auth-stu-roll" class="form-input" placeholder="e.g. STU101" required>
         </div>
         <div class="form-group">
           <label class="form-label">Password</label>
-          <input type="password" id="auth-stu-pass" class="form-input" value="student123" placeholder="Enter student password" required>
+          <input type="password" id="auth-stu-pass" class="form-input" placeholder="Enter student password" required>
         </div>
 
         <!-- Student CAPTCHA Widget -->
@@ -2451,7 +2445,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">Full Name</label>
-          <input type="text" id="signup-name" class="form-input" placeholder="e.g. Aarav Sharma" required>
+          <input type="text" id="signup-name" class="form-input" placeholder="e.g. Alex Morgan" required>
         </div>
         <div class="form-group" id="signup-roll-group">
           <label class="form-label">Roll Number</label>
@@ -2637,18 +2631,20 @@
     function getLocalStudents() {
       const saved = localStorage.getItem('sa_students_roster');
       if (saved) {
-        try { return JSON.parse(saved); } catch(e) {}
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            const dummyRolls = ['STU101', 'STU102', 'STU103', 'STU104', 'STU105', 'STU106', 'STU107', 'STU108', 'STU33'];
+            const dummyNames = ['Aarav Sharma', 'm.vittal', 'Priya Patel', 'Rahul Verma', 'Sneha Reddy', 'Vikram Malhotra', 'Ananya Gupta', 'Karan Joshi', 'Riya Sen'];
+            const clean = parsed.filter(s => !dummyRolls.includes((s.roll_number || '').toUpperCase()) && !dummyNames.includes(s.name));
+            if (clean.length !== parsed.length) {
+              localStorage.setItem('sa_students_roster', JSON.stringify(clean));
+            }
+            return clean;
+          }
+        } catch(e) {}
       }
-      const initial = [
-        { id: 1, roll_number: 'STU33', name: 'm.vittal', department: 'CSE', year: '3rd', section: 'A', face_samples: 5, attendance_pct: 87.5, attended_count: 22, total_classes: 25, risk_level: 'Safe' },
-        { id: 2, roll_number: 'STU101', name: 'Aarav Sharma', department: 'CSE', year: '3rd', section: 'A', face_samples: 5, attendance_pct: 88.0, attended_count: 22, total_classes: 25, risk_level: 'Safe' },
-        { id: 3, roll_number: 'STU102', name: 'Priya Patel', department: 'CSE', year: '3rd', section: 'A', face_samples: 3, attendance_pct: 85.0, attended_count: 20, total_classes: 25, risk_level: 'Safe' },
-        { id: 4, roll_number: 'STU103', name: 'Rahul Verma', department: 'ECE', year: '2nd', section: 'B', face_samples: 2, attendance_pct: 64.0, attended_count: 16, total_classes: 25, risk_level: 'At Risk' },
-        { id: 5, roll_number: 'STU104', name: 'Sneha Reddy', department: 'CSE', year: '3rd', section: 'A', face_samples: 4, attendance_pct: 72.0, attended_count: 18, total_classes: 25, risk_level: 'Watchlist' },
-        { id: 6, roll_number: 'STU105', name: 'Vikram Malhotra', department: 'IT', year: '4th', section: 'C', face_samples: 2, attendance_pct: 92.0, attended_count: 23, total_classes: 25, risk_level: 'Safe' }
-      ];
-      localStorage.setItem('sa_students_roster', JSON.stringify(initial));
-      return initial;
+      return [];
     }
 
     function logLocalAttendance(roll, subject) {
@@ -2689,6 +2685,12 @@
       if (savedUser) {
         try {
           currentUser = JSON.parse(savedUser);
+          const dummyRolls = ['STU101', 'STU102', 'STU103', 'STU104', 'STU105', 'STU106', 'STU107', 'STU108', 'STU33'];
+          const dummyNames = ['Aarav Sharma', 'm.vittal', 'Priya Patel', 'Rahul Verma', 'Sneha Reddy', 'Vikram Malhotra', 'Ananya Gupta', 'Karan Joshi', 'Riya Sen'];
+          if (currentUser && currentUser.role === 'student' && (dummyRolls.includes((currentUser.roll_number || '').toUpperCase()) || dummyNames.includes(currentUser.name))) {
+            localStorage.removeItem('sa_user');
+            currentUser = null;
+          }
         } catch(e) { currentUser = null; }
       }
 
@@ -2749,11 +2751,7 @@
       const isStu = user.role === 'student';
 
       document.querySelectorAll('.demo-chip').forEach(c => c.classList.remove('active'));
-      if (user.username === 'STU33' || user.roll_number === 'STU33') {
-        document.getElementById('chip-stu33')?.classList.add('active');
-      } else if (user.username === 'STU101' || user.roll_number === 'STU101') {
-        document.getElementById('chip-stu101')?.classList.add('active');
-      } else if (user.role === 'faculty') {
+      if (user.role === 'faculty') {
         document.getElementById('chip-fac-vance')?.classList.add('active');
       }
 
@@ -2767,8 +2765,8 @@
         document.getElementById('hero-user-name').innerText = user.name || user.roll_number;
         document.getElementById('hero-user-role').innerText = `Student · ${user.roll_number} · ${user.department || 'CSE'}`;
         
-        const initials = (user.name || 'MV').split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-        document.getElementById('hero-avatar-initials').innerText = initials || 'MV';
+        const initials = (user.name || user.roll_number || 'ST').split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+        document.getElementById('hero-avatar-initials').innerText = initials || 'ST';
         document.getElementById('hero-dept-label').innerText = `${user.department || 'CSE'} & AI`;
         document.getElementById('current-auth-role-label').innerText = `${user.roll_number} · ${user.name}`;
 
@@ -2789,7 +2787,8 @@
     // LOAD DASHBOARD DATA
     async function loadDashboardData() {
       if (!currentUser || currentUser.role !== 'student') return;
-      const roll = currentUser.roll_number || 'STU101';
+      const roll = currentUser.roll_number;
+      if (!roll) return;
       let data = null;
 
       try {
@@ -2799,11 +2798,11 @@
 
       if (!data) {
         const roster = getLocalStudents();
-        const st = roster.find(s => s.roll_number === roll) || roster[0];
+        const st = roster.find(s => s.roll_number === roll) || { attendance_pct: 0, attended_count: 0, total_classes: 0 };
         data = {
-          overall_percentage: st.attendance_pct || 87.5,
-          total_attended: st.attended_count || 22,
-          total_classes: st.total_classes || 25,
+          overall_percentage: st.attendance_pct || 0,
+          total_attended: st.attended_count || 0,
+          total_classes: st.total_classes || 0,
           subject_stats: [
             { subject: 'Machine Learning & AI', percentage: 88.0, attended: 22, total: 25, status: 'SAFE' },
             { subject: 'Database Systems', percentage: 74.0, attended: 17, total: 23, status: 'WATCHLIST' },
@@ -2817,7 +2816,7 @@
         };
       }
 
-      const pct = data.overall_percentage || 87.5;
+      const pct = data.overall_percentage || 0;
       document.getElementById('hero-progress-pct').innerText = `${pct}%`;
       document.getElementById('hero-progress-bar').style.width = `${Math.min(pct, 100)}%`;
 
@@ -3065,10 +3064,10 @@
 
     function openFaceSampleModal() {
       openModal('modal-face-samples');
-      const roll = currentUser?.role === 'student' ? currentUser.roll_number : 'STU33';
+      const roll = currentUser?.role === 'student' ? currentUser.roll_number : (document.getElementById('reg-sample-roll-input')?.value || '');
       const input = document.getElementById('reg-sample-roll-input');
-      if (input) input.value = roll;
-      loadStudentFaceSamples(roll);
+      if (input && roll) input.value = roll;
+      if (roll) loadStudentFaceSamples(roll);
     }
 
     function openRecoveryCalculatorModal() { openModal('modal-recovery'); }
@@ -3299,12 +3298,16 @@
 
       // Vercel Client-Side Fallback if Backend is Offline
       if (!data || !data.status) {
-        const roll = studentRoll || currentUser?.roll_number || 'STU101';
+        const roll = studentRoll || currentUser?.roll_number;
+        if (!roll) {
+          showScanStatus('Please log in as an enrolled student to verify attendance.', 'error');
+          return;
+        }
         const roster = getLocalStudents();
-        const found = roster.find(s => s.roll_number === roll) || { roll_number: roll, name: currentUser?.name || 'Aarav Sharma' };
+        const found = roster.find(s => s.roll_number === roll) || { roll_number: roll, name: currentUser?.name || `Student ${roll}` };
         const samples = JSON.parse(localStorage.getItem(`sa_samples_${roll}`) || '[]');
 
-        if (samples.length === 0 && roll !== 'STU101' && roll !== 'STU33') {
+        if (samples.length === 0) {
           data = {
             status: 'mismatch',
             faces_detected: 1,
@@ -3433,9 +3436,13 @@
         } catch(err) {}
 
         if (!data) {
-          const targetRoll = studentRoll || currentUser?.roll_number || 'STU101';
+          const targetRoll = studentRoll || currentUser?.roll_number;
+          if (!targetRoll) {
+            showScanStatus('Please specify student roll number or log in.', 'error');
+            return;
+          }
           const roster = getLocalStudents();
-          const found = roster.find(s => s.roll_number === targetRoll) || { roll_number: targetRoll, name: currentUser?.name || 'Aarav Sharma' };
+          const found = roster.find(s => s.roll_number === targetRoll) || { roll_number: targetRoll, name: currentUser?.name || `Student ${targetRoll}` };
           data = {
             status: 'success',
             faces_detected: 1,
@@ -3512,7 +3519,11 @@
         return;
       }
 
-      const targetRoll = (document.getElementById('reg-sample-roll-input')?.value || currentUser?.roll_number || 'STU101').trim();
+      const targetRoll = (document.getElementById('reg-sample-roll-input')?.value || currentUser?.roll_number || '').trim();
+      if (!targetRoll) {
+        showToast("Please enter a student roll number to enroll samples.", "error");
+        return;
+      }
       canvas.width = video.videoWidth || 640;
       canvas.height = video.videoHeight || 480;
       const ctx = canvas.getContext('2d');
@@ -3546,7 +3557,11 @@
       if (!input.files || !input.files[0]) return;
       const file = input.files[0];
       const feedback = document.getElementById('sample-reg-log-text');
-      const targetRoll = (document.getElementById('reg-sample-roll-input')?.value || currentUser?.roll_number || 'STU101').trim();
+      const targetRoll = (document.getElementById('reg-sample-roll-input')?.value || currentUser?.roll_number || '').trim();
+      if (!targetRoll) {
+        showToast("Please enter a student roll number to enroll samples.", "error");
+        return;
+      }
 
       feedback.innerText = "Reading photo file & extracting facial descriptor...";
 
@@ -3680,7 +3695,7 @@
       if (!container) return;
       container.innerHTML = '<p style="color: var(--text-muted);">Loading alerts...</p>';
 
-      const roll = currentUser?.role === 'student' ? currentUser.roll_number : 'STU33';
+      const roll = currentUser?.role === 'student' ? currentUser.roll_number : (currentUser?.username || '');
       let list = [];
 
       try {
@@ -3913,7 +3928,7 @@
         serverUser = {
           role: 'student',
           roll_number: roll,
-          name: found ? found.name : (roll === 'STU101' ? 'Aarav Sharma' : (roll === 'STU33' ? 'm.vittal' : `Student ${roll}`)),
+          name: found ? found.name : `Student ${roll}`,
           department: found?.department || 'CSE',
           year: found?.year || '3rd',
           section: found?.section || 'A',
@@ -4569,7 +4584,7 @@
 
       if (apiKey) {
         try {
-          const sysPrompt = `You are an AI Academic Tutor in a university portal for student ${currentUser?.name || 'Student'} (${currentUser?.roll_number || 'STU101'}), studying CSE 3rd Year. Answer clearly, concisely, and academically using markdown formatting.`;
+          const sysPrompt = `You are an AI Academic Tutor in a university portal for student ${currentUser?.name || 'Student'} (${currentUser?.roll_number || 'Enrolled Student'}), studying ${currentUser?.department || 'CSE'}. Answer clearly, concisely, and academically using markdown formatting.`;
           const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
           const res = await fetch(url, {
             method: 'POST',

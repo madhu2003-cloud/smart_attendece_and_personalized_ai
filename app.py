@@ -53,7 +53,7 @@ ALL_SUBJECTS = [
 def format_roll_number(raw_val):
     clean = re.sub(r'[^A-Za-z0-9]', '', (raw_val or '').strip().upper())
     if not clean:
-        return 'STU101'
+        return ''
     if not clean.startswith('STU'):
         clean = 'STU' + clean
     return clean
@@ -72,7 +72,7 @@ def index():
 def login():
     data = request.json or request.form or {}
     role = (data.get('role') or 'student').lower().strip()
-    raw_username = (data.get('username') or '').strip()
+    raw_username = (data.get('username') or data.get('roll_number') or '').strip()
     password = (data.get('password') or '').strip() or '123456'
     subject = (data.get('subject') or 'Machine Learning & AI').strip()
 
@@ -145,7 +145,7 @@ def signup():
     data = request.json or request.form or {}
     role = (data.get('role') or 'student').lower().strip()
     name = (data.get('name') or '').strip()
-    raw_username = (data.get('username') or '').strip()
+    raw_username = (data.get('username') or data.get('roll_number') or '').strip()
     password = (data.get('password') or '').strip() or '123456'
     email = (data.get('email') or '').strip()
     phone = (data.get('phone') or '9876543210').strip()
@@ -400,22 +400,38 @@ def mark_attendance_bulk():
 
 @app.route('/api/student/dashboard', methods=['GET'])
 def student_dashboard():
-    raw_roll = request.args.get('roll_number', 'STU101')
+    raw_roll = request.args.get('roll_number', '')
     roll = format_roll_number(raw_roll)
+    if not roll:
+        return jsonify({
+            'status': 'success',
+            'overall_percentage': 0.0,
+            'total_attended': 0,
+            'total_classes': 0,
+            'risk_level': 'Safe',
+            'subject_stats': [
+                {'subject': subj, 'percentage': 0.0, 'attended': 0, 'total': 0, 'status': 'SAFE'}
+                for subj in ALL_SUBJECTS
+            ]
+        })
 
     conn = get_db()
     cur = conn.cursor()
 
     student = cur.execute("SELECT * FROM students WHERE roll_number = ?", (roll,)).fetchone()
     if not student:
-        name_digits = re.sub(r'\D', '', roll) or '101'
-        name = f"Student {name_digits}"
-        cur.execute("""
-            INSERT INTO students (roll_number, name, department, year, section, email)
-            VALUES (?, ?, 'CSE', '3rd', 'A', ?)
-        """, (roll, name, f"{roll.lower()}@university.edu"))
-        conn.commit()
-        student = cur.execute("SELECT * FROM students WHERE roll_number = ?", (roll,)).fetchone()
+        conn.close()
+        return jsonify({
+            'status': 'success',
+            'overall_percentage': 0.0,
+            'total_attended': 0,
+            'total_classes': 0,
+            'risk_level': 'Safe',
+            'subject_stats': [
+                {'subject': subj, 'percentage': 0.0, 'attended': 0, 'total': 0, 'status': 'SAFE'}
+                for subj in ALL_SUBJECTS
+            ]
+        })
 
     subject_stats = []
     total_attended_all = 0
@@ -452,6 +468,7 @@ def student_dashboard():
     conn.close()
 
     return jsonify({
+        'status': 'success',
         'student': dict(student),
         'overall_percentage': overall_pct,
         'total_attended': total_attended_all,
@@ -762,16 +779,18 @@ def analytics_charts():
         {'subject': 'Python Programming', 'avg': 85.2}
     ]
 
-    scatter_academic = [
-        {'student': 'STU101', 'study_hours': 5.2, 'attendance': 78.4, 'internal_marks': 82.0},
-        {'student': 'STU102', 'study_hours': 6.0, 'attendance': 85.0, 'internal_marks': 88.5},
-        {'student': 'STU103', 'study_hours': 3.1, 'attendance': 58.0, 'internal_marks': 54.0},
-        {'student': 'STU104', 'study_hours': 4.5, 'attendance': 72.0, 'internal_marks': 74.0},
-        {'student': 'STU105', 'study_hours': 6.5, 'attendance': 92.0, 'internal_marks': 91.0},
-        {'student': 'STU106', 'study_hours': 4.0, 'attendance': 68.0, 'internal_marks': 66.0},
-        {'student': 'STU107', 'study_hours': 5.8, 'attendance': 81.0, 'internal_marks': 84.0},
-        {'student': 'STU108', 'study_hours': 6.2, 'attendance': 89.0, 'internal_marks': 89.0}
-    ]
+    scatter_academic = []
+    registered_students = cur.execute("SELECT roll_number, name FROM students").fetchall()
+    for s_row in registered_students:
+        s_roll = s_row['roll_number']
+        tot_att = cur.execute("SELECT COUNT(*) FROM attendance WHERE roll_number = ?", (s_roll,)).fetchone()[0]
+        pct = min(100.0, round((tot_att / max(1, 25)) * 100, 1))
+        scatter_academic.append({
+            'student': s_roll,
+            'study_hours': 5.0,
+            'attendance': pct,
+            'internal_marks': 80.0
+        })
 
     conn.close()
 

@@ -1625,13 +1625,16 @@
           </div>
         </div>
       </div>
-      <div style="display: flex; align-items: center; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
         <span id="geo-distance-pill" style="font-size: 0.78rem; font-family: var(--font-mono); color: var(--text-dim); background: rgba(0,0,0,0.2); padding: 4px 10px; border-radius: 6px;">
           GPS: Locating...
         </span>
-        <span id="geo-badge-pill" style="font-size: 0.78rem; font-weight: 800; padding: 4px 12px; border-radius: 99px; background: rgba(245, 158, 11, 0.15); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.3);">
-          Checking Range
+        <span id="geo-badge-pill" style="font-size: 0.78rem; font-weight: 800; padding: 4px 12px; border-radius: 99px; background: rgba(34, 197, 94, 0.15); color: var(--emerald); border: 1px solid rgba(34, 197, 94, 0.3);">
+          🟢 Inside Campus
         </span>
+        <button type="button" class="btn-quick" onclick="syncGeofenceToCurrentDeviceLocation()" style="font-size: 0.74rem; padding: 4px 12px; border-color: var(--lime); color: var(--lime); background: rgba(200,245,90,0.1);" title="Center geofence on current device GPS">
+          📍 Use My Location
+        </button>
       </div>
     </div>
 
@@ -1915,17 +1918,17 @@
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
             <div>
               <label class="form-label" style="font-size: 0.74rem;">Campus Latitude</label>
-              <input type="number" step="any" id="fac-geo-lat" class="form-input" value="17.385044" required>
+              <input type="number" step="any" id="fac-geo-lat" class="form-input" value="11.000563" required>
             </div>
             <div>
               <label class="form-label" style="font-size: 0.74rem;">Campus Longitude</label>
-              <input type="number" step="any" id="fac-geo-lng" class="form-input" value="78.486671" required>
+              <input type="number" step="any" id="fac-geo-lng" class="form-input" value="76.966575" required>
             </div>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;">
             <div>
               <label class="form-label" style="font-size: 0.74rem;">Allowed Perimeter Radius (Meters)</label>
-              <input type="number" id="fac-geo-radius" class="form-input" value="250" required>
+              <input type="number" id="fac-geo-radius" class="form-input" value="500" required>
             </div>
             <div>
               <label class="form-label" style="font-size: 0.74rem;">Enforcement Status</label>
@@ -1935,14 +1938,17 @@
               </select>
             </div>
           </div>
-          <div style="display: flex; gap: 10px;">
+          <div style="display: flex; gap: 10px; margin-bottom: 8px;">
             <button type="button" class="btn-bento-secondary" onclick="detectFacultyCurrentLocation()" style="flex: 1; font-size: 0.8rem;">
-              📡 Use My Device GPS
+              📡 Fetch Device GPS
             </button>
             <button type="submit" class="btn-bento-lime" style="flex: 1; font-size: 0.8rem;">
               Save Policy 💾
             </button>
           </div>
+          <button type="button" class="btn-bento-lime" onclick="syncGeofenceToCurrentDeviceLocation()" style="width: 100%; font-size: 0.82rem; background: linear-gradient(135deg, var(--lime), var(--cyan)); color: #12180c;">
+            📍 Set Campus Geofence to My Location Now
+          </button>
         </form>
       </div>
 
@@ -1993,7 +1999,12 @@
     <!-- STUDENT ROSTER TABLE -->
     <div class="roster-table-card">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 10px;">
-        <h3 style="font-size: 1.35rem; font-weight: 800; color: var(--text-main);">Enrolled Student Roster</h3>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <h3 style="font-size: 1.35rem; font-weight: 800; color: var(--text-main); margin: 0;">Enrolled Student Roster</h3>
+          <span id="faculty-roster-count" style="font-size: 0.78rem; font-weight: 800; background: rgba(200,245,90,0.15); color: var(--lime); padding: 4px 12px; border-radius: 99px; border: 1px solid rgba(200,245,90,0.3);">
+            Loading students...
+          </span>
+        </div>
         <div style="display: flex; gap: 10px;">
           <input type="text" id="roster-search-input" class="form-input" placeholder="Search by name or roll..." oninput="filterRoster()" style="width: 240px; padding: 8px 14px; font-size: 0.82rem;">
         </div>
@@ -2669,6 +2680,8 @@
       initTheme();
       buildDateCarousel();
       loadGeofenceSettings();
+      syncGeofenceToCurrentDeviceLocation(false);
+      updateNotificationRecipientDropdowns();
       updateGeminiKeyStatusUI();
       generateCaptcha();
 
@@ -2850,20 +2863,63 @@
       });
     }
 
-    // FACULTY ROSTER
+    // FACULTY ROSTER WITH DYNAMIC RECIPIENT DROPDOWNS
     let cachedStudents = [];
     async function loadFacultyRoster() {
+      let serverStudents = [];
       try {
         const res = await fetch('/api/students');
         if (res.ok) {
-          cachedStudents = await res.json();
-        } else {
-          cachedStudents = getLocalStudents();
+          serverStudents = await res.json();
         }
-      } catch(e) {
-        cachedStudents = getLocalStudents();
-      }
+      } catch(e) {}
+
+      // Merge server students and local roster so newly registered students are never missing
+      const localStudents = getLocalStudents();
+      const mergedMap = new Map();
+
+      // Start with local students
+      localStudents.forEach(s => mergedMap.set(s.roll_number, s));
+
+      // Merge or update with server students
+      serverStudents.forEach(s => {
+        if (mergedMap.has(s.roll_number)) {
+          mergedMap.set(s.roll_number, { ...mergedMap.get(s.roll_number), ...s });
+        } else {
+          mergedMap.set(s.roll_number, s);
+        }
+      });
+
+      cachedStudents = Array.from(mergedMap.values());
+      localStorage.setItem('sa_students_roster', JSON.stringify(cachedStudents));
+
       renderRosterTable(cachedStudents);
+      updateNotificationRecipientDropdowns(cachedStudents);
+    }
+
+    function updateNotificationRecipientDropdowns(studentsList) {
+      const list = (studentsList && studentsList.length > 0) ? studentsList : getLocalStudents();
+
+      const options = [
+        `<option value="ALL">📢 All Students (Broadcast — ${list.length} Enrolled)</option>`,
+        ...list.map(s => `<option value="${s.roll_number}">${s.roll_number} - ${s.name} (${s.department || 'CSE'})</option>`)
+      ].join('');
+
+      const dispatchSelect = document.getElementById('fac-dispatch-recipient');
+      const broadcastSelect = document.getElementById('broadcast-recipient');
+
+      if (dispatchSelect) dispatchSelect.innerHTML = options;
+      if (broadcastSelect) broadcastSelect.innerHTML = options;
+
+      const countBadge = document.getElementById('faculty-roster-count');
+      if (countBadge) {
+        countBadge.innerText = `${list.length} Students Enrolled`;
+      }
+    }
+
+    function openBroadcastModal() {
+      updateNotificationRecipientDropdowns(cachedStudents);
+      openModal('modal-broadcast');
     }
 
     function renderRosterTable(list) {
@@ -3924,24 +3980,59 @@
       e.preventDefault();
       const role = document.getElementById('signup-role').value;
       const name = document.getElementById('signup-name').value.trim();
-      const roll = (document.getElementById('signup-roll').value.trim() || 'STU110').toUpperCase();
+      const rawRoll = document.getElementById('signup-roll').value.trim();
+      const roll = (rawRoll ? (rawRoll.toUpperCase().startsWith('STU') ? rawRoll.toUpperCase() : 'STU' + rawRoll.toUpperCase()) : 'STU' + Math.floor(100 + Math.random()*900));
       const subj = document.getElementById('signup-subj').value.trim();
       const email = document.getElementById('signup-email').value.trim();
       const pass = document.getElementById('signup-pass').value.trim();
 
+      // 1. Post to backend
+      let serverUser = null;
       try {
-        await fetch('/api/auth/signup', {
+        const res = await fetch('/api/auth/signup', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({ role, name, username: role === 'student' ? roll : name, password: pass, email, subject: subj, department: 'CSE' })
         });
+        if (res.ok) {
+          const d = await res.json();
+          serverUser = d.user;
+        }
       } catch(err) {}
 
-      currentUser = { role, name, roll_number: roll, username: role === 'student' ? roll : name, subject: subj, department: 'CSE' };
+      // 2. CRITICAL: Append new student into sa_students_roster in localStorage!
+      if (role === 'student') {
+        const roster = getLocalStudents();
+        const existingIdx = roster.findIndex(s => s.roll_number === roll);
+        const newEntry = {
+          id: Date.now(),
+          roll_number: roll,
+          name: name,
+          department: 'CSE',
+          year: '3rd',
+          section: 'A',
+          email: email || `${roll.toLowerCase()}@university.edu`,
+          face_samples: 0,
+          attendance_pct: 0.0,
+          attended_count: 0,
+          total_classes: 25,
+          risk_level: 'Safe'
+        };
+        if (existingIdx >= 0) {
+          roster[existingIdx] = { ...roster[existingIdx], ...newEntry };
+        } else {
+          roster.push(newEntry);
+        }
+        localStorage.setItem('sa_students_roster', JSON.stringify(roster));
+        cachedStudents = roster;
+        updateNotificationRecipientDropdowns(roster);
+      }
+
+      currentUser = serverUser || { role, name, roll_number: roll, username: role === 'student' ? roll : name, subject: subj, department: 'CSE' };
       localStorage.setItem('sa_user', JSON.stringify(currentUser));
       applyUserToUI(currentUser);
       closeModal('modal-auth');
-      showToast("Account created successfully!", "success");
+      showToast(`Account created for ${name} (${role === 'student' ? roll : 'Faculty'})!`, "success");
       if (role === 'student') {
         loadDashboardData();
         startGeofenceWatcher();
@@ -4061,12 +4152,73 @@
 
     // ==================== CAMPUS GEOFENCE ENGINE ====================
     let campusGeofence = {
-      campus_name: 'Main Engineering Campus',
-      latitude: 17.385044,
-      longitude: 78.486671,
-      radius_meters: 250.0,
+      campus_name: 'Main Engineering Campus (Coimbatore)',
+      latitude: 11.000563,
+      longitude: 76.966575,
+      radius_meters: 500.0,
       is_enabled: 1
     };
+
+    async function syncGeofenceToCurrentDeviceLocation(showNotification = true) {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            const lat = parseFloat(pos.coords.latitude.toFixed(6));
+            const lng = parseFloat(pos.coords.longitude.toFixed(6));
+            studentCurrentLocation = { lat, lng, accuracy: pos.coords.accuracy };
+            campusGeofence.latitude = lat;
+            campusGeofence.longitude = lng;
+            campusGeofence.radius_meters = 500.0;
+            campusGeofence.campus_name = "Campus (My Current Location)";
+            campusGeofence.is_enabled = 1;
+
+            localStorage.setItem('sa_geofence', JSON.stringify(campusGeofence));
+            updateGeofenceUI();
+            evaluateStudentGeofence();
+
+            try {
+              fetch('/api/geofence/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ role: 'faculty', ...campusGeofence })
+              });
+            } catch(e) {}
+
+            if (showNotification) {
+              showToast(`📍 Geofence center synchronized to your current GPS: ${lat}, ${lng}`, "success");
+            }
+          },
+          async (err) => {
+            try {
+              const r = await fetch('https://ipapi.co/json/');
+              if (r.ok) {
+                const d = await r.json();
+                if (d.latitude && d.longitude) {
+                  const lat = parseFloat(d.latitude.toFixed(6));
+                  const lng = parseFloat(d.longitude.toFixed(6));
+                  studentCurrentLocation = { lat, lng, simulated: true };
+                  campusGeofence.latitude = lat;
+                  campusGeofence.longitude = lng;
+                  campusGeofence.radius_meters = 500.0;
+                  campusGeofence.campus_name = `Campus (${d.city || 'My Location'})`;
+                  campusGeofence.is_enabled = 1;
+
+                  localStorage.setItem('sa_geofence', JSON.stringify(campusGeofence));
+                  updateGeofenceUI();
+                  evaluateStudentGeofence();
+                  if (showNotification) {
+                    showToast(`📍 Geofence center set to your location (${d.city || 'Local'}: ${lat}, ${lng})`, "success");
+                  }
+                }
+              }
+            } catch(e) {
+              if (showNotification) showToast("Could not detect location. Using Coimbatore campus defaults.", "warning");
+            }
+          },
+          { enableHighAccuracy: true, timeout: 5000 }
+        );
+      }
+    }
 
     let studentCurrentLocation = null;
 

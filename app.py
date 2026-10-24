@@ -565,10 +565,10 @@ def get_geofence():
         return jsonify(dict(row))
     return jsonify({
         'id': 1,
-        'campus_name': 'Main Engineering Campus',
-        'latitude': 17.385044,
-        'longitude': 78.486671,
-        'radius_meters': 250.0,
+        'campus_name': 'Main Engineering Campus (Coimbatore)',
+        'latitude': 11.000563,
+        'longitude': 76.966575,
+        'radius_meters': 500.0,
         'is_enabled': 1,
         'updated_by': 'Prof. Robert Vance'
     })

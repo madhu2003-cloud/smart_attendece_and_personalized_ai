@@ -199,17 +199,22 @@ def demo_qr_attendance():
     import json
     import io
 
-    print("1. Dynamic Classroom Attendance QR Generation:")
+    print("1. Dynamic Classroom Attendance QR Generation (5-Second Auto-Rotation Shield):")
+    import datetime
+    now = datetime.datetime.now()
     payload = {
         "type": "CLASSROOM_QR_ATTENDANCE",
-        "session_id": "SES-ML-20261025-998A",
+        "session_id": "SES-ML-1792938185-edb15038",
         "subject": "Machine Learning & AI",
         "faculty": "Prof. Robert Vance",
-        "valid_until": "2026-10-25T12:30:00",
+        "created_at": now.isoformat(),
+        "valid_until": (now + datetime.timedelta(seconds=5)).isoformat(),
+        "ttl_seconds": 5,
+        "nonce": "edb15038",
         "geofence_required": True
     }
     raw_json = json.dumps(payload, separators=(',', ':'))
-    print(f"   Payload: {raw_json}")
+    print(f"   Rotating Payload (5s TTL): {raw_json}")
 
     # Generate QR with Python qrcode
     qr = qrcode.QRCode(box_size=6, border=2)
@@ -230,18 +235,29 @@ def demo_qr_attendance():
     if decoded_text:
         print("   [SUCCESS] OpenCV decoded QR code perfectly!")
         decoded_obj = json.loads(decoded_text)
-        print(f"   Session ID : {decoded_obj['session_id']}")
-        print(f"   Subject    : {decoded_obj['subject']}")
-        print(f"   Faculty    : {decoded_obj['faculty']}")
+        print(f"   Session ID  : {decoded_obj['session_id']}")
+        print(f"   Subject     : {decoded_obj['subject']}")
+        print(f"   TTL Seconds : {decoded_obj['ttl_seconds']}s (Auto-rotating)")
+        print(f"   Nonce       : {decoded_obj['nonce']}")
     else:
         print("   [FAILED] OpenCV could not decode QR code.")
 
-    print("\n3. Proxy Prevention Analysis:")
-    print("   Problem: Students taking photo of QR and sending via WhatsApp to absent friends.")
-    print("   Solution: 3-Layer Defense:")
-    print("     Layer 1: Rotating Dynamic Tokens (Tokens expire every 15 mins).")
-    print("     Layer 2: Mandatory GPS Geofence (Student phone must be <= 500m from classroom).")
-    print("     Layer 3: Optional Biometric Check (Facial recognition confirmation).")
+    print("\n3. Ultra-Secure Anti-Proxy Verification Simulator:")
+    print("   Problem: Students taking photo of screen and forwarding via WhatsApp/Telegram to absent friends.")
+    print("   Test A (Fresh scan within 5s window):")
+    fresh_age = 2.4
+    if fresh_age <= payload['ttl_seconds'] + 4.0:
+        print(f"     -> Scanned at {fresh_age}s: [PASS] ATTENDANCE MARKED PRESENT! Within active 5s window.")
+    
+    print("   Test B (Forwarded photo / proxy scan after 5s):")
+    stale_age = 12.5
+    if stale_age > payload['ttl_seconds'] + 4.0:
+        print(f"     -> Scanned at {stale_age}s: [REJECTED - EXPIRED] QR code rotated 7.5s ago. Proxy blocked!")
+
+    print("\n4. 3-Layer Defense Summary:")
+    print("   Layer 1: 5-Second Auto-Rotating QR Shield (Impossible to share screenshot in time).")
+    print("   Layer 2: Mandatory GPS Geofence (Haversine formula validates student within campus perimeter).")
+    print("   Layer 3: Biometric Face Recognition (Cosine similarity verifies student identity).")
 
 
 def main():

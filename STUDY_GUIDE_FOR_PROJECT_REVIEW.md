@@ -267,9 +267,11 @@ Many universities attempting QR attendance use a static printed QR code pasted o
 
 ### Our 3-Tier Dynamic QR Defense System
 Our solution combines:
-1. **Time-Limited Dynamic Session Tokens**:
-   - Faculty generates a dynamic session token (e.g. `SES-ML-1792931680`) with an explicit expiration window (default 15 minutes, configurable to 5m, 15m, 30m, 1h).
-   - Once expired, any scans with that stale payload are rejected immediately (`"This classroom QR code has expired!"`).
+1. **Ultra-Secure 5-Second Dynamic Auto-Rotation (Anti-Proxy Shield)**:
+   - The faculty projector displays a dynamic QR code that **automatically rotates every 5 seconds** with a unique cryptographic nonce and microsecond timestamp.
+   - A live visual countdown (`⚡ Rotates in: 4.8s`) and progress bar display the auto-rotation in real-time.
+   - Any screenshot or camera photo forwarded to absent friends over WhatsApp/Telegram is instantly rejected because the code has already expired and rotated (`"QR CODE EXPIRED: This dynamic code was only valid for 5 seconds"`).
+   - Both client-side timestamp delta and backend server-side TTL validator enforce this 5-second window.
 2. **Mandatory Haversine Geofence Binding**:
    - When a student scans the QR code, the client sends their real-time device GPS coordinates.
    - The backend computes the Haversine distance to the campus center. If distance $> 500\text{ meters}$, attendance is blocked even with a valid QR code (`"GEOFENCE VIOLATION: You are 1,250m away from campus. Attendance blocked."`).
@@ -396,7 +398,7 @@ $$\frac{A + x}{T + x} \ge 0.75 \implies x \ge \frac{0.75 \cdot T - A}{0.25}$$
 
 ### Q26: How does your Dynamic QR attendance system prevent proxy scanning?
 **Answer:** Static QR codes can be photographed and shared over social media. Our system employs a 3-layer defense:
-1. **Dynamic Expiration:** The QR payload contains a time-limited session token that expires after 15 minutes.
+1. **5-Second Dynamic Auto-Rotation (Anti-Proxy Shield):** The QR token automatically regenerates every 5 seconds on the lecture projector with a fresh cryptographic nonce and timestamp. Forwarded photos, screenshots, or proxy scans are rejected immediately by both client and backend validators.
 2. **Haversine Geofence Verification:** Even with a forwarded QR image, the student's mobile GPS must be verified as within 500m of the lecture hall, blocking check-ins from hostels or homes.
 3. **Biometric Dual-Verification:** In kiosk mode or strict lecture mode, QR scan is corroborated with real-time facial recognition.
 

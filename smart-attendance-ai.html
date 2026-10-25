@@ -272,10 +272,55 @@
         return;
       }
 
-      // Check expired session
+      // Client-side anti-proxy verification for dynamic 5-second rotation
+      let parsedPayload = null;
+      try {
+        parsedPayload = JSON.parse(qrString);
+      } catch(e) {}
+
+      if (parsedPayload && parsedPayload.type === 'CLASSROOM_QR_ATTENDANCE') {
+        const ttlSec = parsedPayload.ttl_seconds;
+        const createdAt = parsedPayload.created_at;
+        if (ttlSec && createdAt) {
+          const ageSec = (Date.now() - new Date(createdAt).getTime()) / 1000;
+          const maxAllowed = parseFloat(ttlSec) + 4.5;
+          if (ageSec > maxAllowed) {
+            const expMsg = `QR CODE EXPIRED: This dynamic code was valid for ${ttlSec}s and has rotated (${ageSec.toFixed(1)}s ago). Forwarded photos & proxy scans are strictly blocked!`;
+            showToast(expMsg, "error");
+            const resCard = document.getElementById('qr-scan-result-card');
+            if (resCard) {
+              resCard.style.display = 'block';
+              resCard.style.background = 'rgba(244, 63, 94, 0.15)';
+              resCard.style.borderColor = 'var(--rose)';
+              document.getElementById('qr-res-title').innerText = 'QR Code Expired (Anti-Proxy Shield) ⏱️';
+              document.getElementById('qr-res-title').style.color = 'var(--rose)';
+              document.getElementById('qr-res-detail').innerText = expMsg + " Please scan the current live QR on screen.";
+            }
+            setTimeout(() => {
+              isQrProcessing = false;
+              document.getElementById('qr-target-reticle')?.classList.remove('detected');
+            }, 3500);
+            return;
+          }
+        }
+      }
+
+      // Server expired status check
       if (serverResult && serverResult.status === 'expired') {
         showToast(serverResult.message, "error");
-        setTimeout(() => { isQrProcessing = false; }, 3000);
+        const resCard = document.getElementById('qr-scan-result-card');
+        if (resCard) {
+          resCard.style.display = 'block';
+          resCard.style.background = 'rgba(244, 63, 94, 0.15)';
+          resCard.style.borderColor = 'var(--rose)';
+          document.getElementById('qr-res-title').innerText = 'QR Code Expired (Anti-Proxy Shield) ⏱️';
+          document.getElementById('qr-res-title').style.color = 'var(--rose)';
+          document.getElementById('qr-res-detail').innerText = serverResult.message;
+        }
+        setTimeout(() => {
+          isQrProcessing = false;
+          document.getElementById('qr-target-reticle')?.classList.remove('detected');
+        }, 3500);
         return;
       }
 
@@ -303,31 +348,65 @@
       }, 4000);
     }
 
+    function parseValiditySeconds(valStr) {
+      const str = String(valStr || '5s').trim().toLowerCase();
+      if (str.endsWith('s')) {
+        return Math.max(3, parseInt(str.replace(/[^0-9]/g, '') || '5', 10));
+      } else if (str.endsWith('m')) {
+        return Math.max(30, parseInt(str.replace(/[^0-9]/g, '') || '5', 10) * 60);
+      } else {
+        const num = parseInt(str, 10);
+        return isNaN(num) ? 5 : (num <= 60 ? num : num * 60);
+      }
+    }
+
+    function stopClassroomQrRotation() {
+      if (facQrCountdownTimer) {
+        clearInterval(facQrCountdownTimer);
+        facQrCountdownTimer = null;
+      }
+    }
+
     async function openClassroomQrModal() {
       openModal('modal-classroom-qr');
       const facSubj = currentUser?.subject || 'Machine Learning & AI';
       const subjSelect = document.getElementById('fac-qr-subject');
       if (subjSelect) subjSelect.value = facSubj;
+      const valSelect = document.getElementById('fac-qr-validity');
+      if (valSelect && (!valSelect.value || valSelect.value === '15')) valSelect.value = '5s';
       await generateClassroomQrSession();
     }
 
     async function generateClassroomQrSession() {
       const subject = document.getElementById('fac-qr-subject')?.value || 'Machine Learning & AI';
-      const validMins = parseInt(document.getElementById('fac-qr-validity')?.value || '15', 10);
+      const validityRaw = document.getElementById('fac-qr-validity')?.value || '5s';
+      const ttlSeconds = parseValiditySeconds(validityRaw);
       const facName = currentUser?.name || 'Prof. Robert Vance';
 
       document.getElementById('proj-subject-title').innerText = subject;
       const codeSpan = document.getElementById('proj-session-code');
-      const randomToken = Math.random().toString(36).substring(2, 7).toUpperCase();
-      const sessionCode = `SES-${subject.substring(0,2).toUpperCase()}-${randomToken}`;
+      const randomNonce = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const sessionCode = `SES-${subject.substring(0,2).toUpperCase()}-${Date.now().toString().slice(-4)}-${randomNonce}`;
       if (codeSpan) codeSpan.innerText = sessionCode;
+
+      // Pulse visual effect when token rotates
+      const frame = document.getElementById('fac-qr-frame');
+      if (frame) {
+        frame.classList.add('qr-refresh-pulse');
+        setTimeout(() => frame.classList.remove('qr-refresh-pulse'), 350);
+      }
 
       let qrImageUrl = '';
       try {
         const res = await fetch('/api/qr/generate_session', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ subject: subject, valid_minutes: validMins, faculty_name: facName })
+          body: JSON.stringify({
+            subject: subject,
+            validity: validityRaw,
+            ttl_seconds: ttlSeconds,
+            faculty_name: facName
+          })
         });
         if (res.ok) {
           const d = await res.json();
@@ -337,13 +416,18 @@
 
       // Fallback for Vercel static support
       if (!qrImageUrl) {
+        const nowIso = new Date().toISOString();
+        const validUntilIso = new Date(Date.now() + ttlSeconds * 1000).toISOString();
         const payloadObj = {
           type: 'CLASSROOM_QR_ATTENDANCE',
           session_id: sessionCode,
           subject: subject,
           faculty: facName,
-          date: new Date().toISOString().substring(0, 10),
-          valid_until: new Date(Date.now() + validMins * 60000).toISOString(),
+          date: nowIso.substring(0, 10),
+          created_at: nowIso,
+          valid_until: validUntilIso,
+          ttl_seconds: ttlSeconds,
+          nonce: randomNonce,
           geofence_required: true
         };
         const encoded = encodeURIComponent(JSON.stringify(payloadObj));
@@ -353,34 +437,66 @@
       const imgElem = document.getElementById('fac-qr-img');
       if (imgElem) imgElem.src = qrImageUrl;
 
-      startFacQrCountdown(validMins * 60);
+      startFacQrCountdown(ttlSeconds);
     }
 
     function startFacQrCountdown(totalSeconds) {
-      if (facQrCountdownTimer) clearInterval(facQrCountdownTimer);
-      let remaining = totalSeconds;
+      stopClassroomQrRotation();
+      const startTime = Date.now();
+      const durationMs = totalSeconds * 1000;
+      const endTime = startTime + durationMs;
+
+      const timerText = document.getElementById('fac-qr-timer-text');
+      const bar = document.getElementById('fac-qr-progress-bar');
+      const shieldText = document.getElementById('fac-qr-shield-text');
+      const isAutoRotate = totalSeconds <= 30;
+
+      if (shieldText) {
+        if (isAutoRotate) {
+          shieldText.innerHTML = `⚡ <strong>${totalSeconds}-Second Dynamic Auto-Rotating Shield Active:</strong> Anti-Proxy Protection`;
+        } else {
+          shieldText.innerHTML = `⏱️ Standard Window (${Math.round(totalSeconds/60)} Mins)`;
+        }
+      }
 
       function tick() {
-        const mins = Math.floor(remaining / 60);
-        const secs = remaining % 60;
-        const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')} remaining`;
-        const timerText = document.getElementById('fac-qr-timer-text');
-        const bar = document.getElementById('fac-qr-progress-bar');
+        const now = Date.now();
+        const remainingMs = Math.max(0, endTime - now);
+        const remainingSec = (remainingMs / 1000);
+        const progressPercent = Math.max(0, Math.min(100, (remainingMs / durationMs) * 100));
 
-        if (timerText) timerText.innerText = timeStr;
-        if (bar) bar.style.width = `${(remaining / totalSeconds) * 100}%`;
+        if (bar) bar.style.width = `${progressPercent}%`;
 
-        if (remaining <= 0) {
-          clearInterval(facQrCountdownTimer);
-          if (timerText) timerText.innerText = "EXPIRED (Token Stale)";
-          if (bar) bar.style.width = "0%";
-          showToast("Classroom QR session expired. Click 'Rotate Token' to refresh.", "warning");
+        if (timerText) {
+          if (totalSeconds <= 15) {
+            timerText.innerHTML = `<span style="color:var(--lime); font-size:1.05rem; font-weight:800;">⚡ Rotates in: ${remainingSec.toFixed(1)}s</span>`;
+          } else if (totalSeconds <= 60) {
+            timerText.innerText = `⏱️ Rotates in: ${remainingSec.toFixed(1)}s`;
+          } else {
+            const mins = Math.floor(remainingSec / 60);
+            const secs = Math.floor(remainingSec % 60);
+            timerText.innerText = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')} remaining`;
+          }
         }
-        remaining--;
+
+        if (remainingMs <= 0) {
+          stopClassroomQrRotation();
+          if (isAutoRotate) {
+            // Check if modal is still open before rotating
+            const modal = document.getElementById('modal-classroom-qr');
+            if (modal && modal.classList.contains('active')) {
+              generateClassroomQrSession();
+            }
+          } else {
+            if (timerText) timerText.innerText = "EXPIRED (Token Stale)";
+            if (bar) bar.style.width = "0%";
+            showToast("Classroom QR session expired. Click 'Rotate Token' to refresh.", "warning");
+          }
+        }
       }
 
       tick();
-      facQrCountdownTimer = setInterval(tick, 1000);
+      facQrCountdownTimer = setInterval(tick, 50);
     }
 
     function downloadClassroomQr() {
@@ -2114,6 +2230,20 @@
       box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 25px rgba(200, 245, 90, 0.25);
       margin-bottom: 20px;
       border: 4px solid var(--lime);
+      transition: all 0.25s ease;
+      position: relative;
+    }
+    .qr-image-frame.qr-refresh-pulse {
+      animation: qrRefreshAnim 0.35s ease;
+    }
+    @keyframes qrRefreshAnim {
+      0% { transform: scale(1); filter: brightness(1); }
+      50% { transform: scale(0.96); filter: brightness(1.25); border-color: var(--cyan); }
+      100% { transform: scale(1); filter: brightness(1); border-color: var(--lime); }
+    }
+    @keyframes pulseDot {
+      0% { opacity: 0.4; transform: scale(0.85); }
+      100% { opacity: 1; transform: scale(1.15); box-shadow: 0 0 12px var(--lime); }
     }
     .qr-image-frame img {
       width: 100%;
@@ -3233,6 +3363,12 @@
         <button type="button" class="modal-close-icon" onclick="closeModal('modal-classroom-qr')">✕</button>
       </div>
 
+            <!-- ANTI-PROXY SHIELD BANNER -->
+      <div id="fac-qr-shield-badge" style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 14px; background: rgba(200, 245, 90, 0.12); border: 1px solid rgba(200, 245, 90, 0.35); border-radius: 99px; padding: 6px 14px; font-size: 0.76rem; color: var(--lime); font-weight: 700;">
+        <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--lime); box-shadow:0 0 10px var(--lime); animation: pulseDot 1s infinite alternate;"></span>
+        <span id="fac-qr-shield-text">⚡ 5-Second Auto-Rotating Anti-Proxy Shield Active</span>
+      </div>
+
       <!-- CONFIGURATION STRIP -->
       <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 10px; margin-bottom: 20px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 14px; border: 1px solid var(--card-border);">
         <div>
@@ -3246,12 +3382,13 @@
           </select>
         </div>
         <div>
-          <label class="form-label" style="font-size: 0.72rem;">Token Validity</label>
+          <label class="form-label" style="font-size: 0.72rem;">Token Validity & Rotation</label>
           <select id="fac-qr-validity" class="form-input" onchange="generateClassroomQrSession()">
-            <option value="5">5 Minutes</option>
-            <option value="15" selected>15 Minutes</option>
-            <option value="30">30 Minutes</option>
-            <option value="60">1 Hour</option>
+            <option value="5s" selected>⚡ 5 Seconds (Ultra-Secure Anti-Proxy Shield)</option>
+            <option value="10s">⚡ 10 Seconds (Fast Rotating)</option>
+            <option value="30s">⏱️ 30 Seconds (Quick Refresh)</option>
+            <option value="5m">5 Minutes (Extended Window)</option>
+            <option value="15m">15 Minutes (Static Presentation)</option>
           </select>
         </div>
         <div style="display: flex; align-items: flex-end;">
@@ -3283,16 +3420,16 @@
         <!-- Live Countdown Timer -->
         <div style="width: 100%; max-width: 320px; margin-bottom: 14px;">
           <div style="display: flex; justify-content: space-between; font-size: 0.78rem; font-weight: 700; margin-bottom: 6px;">
-            <span style="color: var(--text-muted);">Session Expiry:</span>
-            <span style="color: var(--cyan); font-family: var(--font-mono);" id="fac-qr-timer-text">14:59 remaining</span>
+            <span style="color: var(--text-muted);">Rotation Countdown:</span>
+            <span style="color: var(--cyan); font-family: var(--font-mono); font-size: 0.92rem; font-weight: 800;" id="fac-qr-timer-text">⚡ Rotates in: 5.0s</span>
           </div>
           <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 99px; overflow: hidden;">
-            <div id="fac-qr-progress-bar" style="width: 100%; height: 100%; background: linear-gradient(90deg, var(--lime), var(--cyan)); transition: width 1s linear;"></div>
+            <div id="fac-qr-progress-bar" style="width: 100%; height: 100%; background: linear-gradient(90deg, var(--lime), var(--cyan)); transition: width 0.05s linear;"></div>
           </div>
         </div>
 
         <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0; line-height: 1.4;">
-          🛡️ <em>Geofence Protected:</em> Students must be physically located within 500m of the campus to verify attendance.
+          🛡️ <strong>5-Second Anti-Proxy Protection:</strong> The QR code rotates automatically every 5 seconds. Forwarded WhatsApp screenshots, camera photos, and proxy attendance are strictly blocked.
         </p>
       </div>
 
@@ -3905,6 +4042,12 @@
       }
       if (id === 'modal-face-samples') {
         stopSampleRegWebcam();
+      }
+      if (id === 'modal-classroom-qr') {
+        stopClassroomQrRotation();
+      }
+      if (id === 'modal-qr-scanner') {
+        stopQrCamera();
       }
     }
 

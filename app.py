@@ -757,15 +757,33 @@ def face_recognize_frame():
 
 @app.route('/api/qr/generate_session', methods=['POST'])
 def qr_generate_session():
-    """Generate a dynamic classroom attendance QR session with expiry and security token."""
+    """Generate an ultra-secure dynamic classroom attendance QR session with 5-second auto-rotation."""
     data = request.json or {}
     subject = (data.get('subject') or 'Machine Learning & AI').strip()
-    valid_minutes = int(data.get('valid_minutes') or 15)
     faculty_name = (data.get('faculty_name') or 'Prof. Robert Vance').strip()
 
+    # Support ttl_seconds or valid_minutes (default: 5 seconds for anti-proxy auto-rotation)
+    raw_valid = str(data.get('validity') or data.get('ttl_seconds') or data.get('valid_minutes') or '5s').strip().lower()
+    if raw_valid.endswith('s'):
+        ttl_seconds = max(3, int(re.sub(r'[^0-9]', '', raw_valid) or 5))
+    elif raw_valid.endswith('m'):
+        ttl_seconds = max(30, int(re.sub(r'[^0-9]', '', raw_valid) or 5) * 60)
+    else:
+        try:
+            val = int(raw_valid)
+            if 'ttl_seconds' in data:
+                ttl_seconds = val
+            elif 'valid_minutes' in data:
+                ttl_seconds = val * 60
+            else:
+                ttl_seconds = val if val <= 60 else val * 60
+        except Exception:
+            ttl_seconds = 5
+
     now = datetime.datetime.now()
-    valid_until = now + datetime.timedelta(minutes=valid_minutes)
-    session_id = f"SES-{re.sub(r'[^A-Z0-9]', '', subject.upper())[:6]}-{int(now.timestamp())}"
+    valid_until = now + datetime.timedelta(seconds=ttl_seconds)
+    nonce = os.urandom(4).hex()
+    session_id = f"SES-{re.sub(r'[^A-Z0-9]', '', subject.upper())[:6]}-{int(now.timestamp())}-{nonce}"
 
     payload = {
         'type': 'CLASSROOM_QR_ATTENDANCE',
@@ -775,7 +793,8 @@ def qr_generate_session():
         'date': now.strftime('%Y-%m-%d'),
         'created_at': now.isoformat(),
         'valid_until': valid_until.isoformat(),
-        'valid_minutes': valid_minutes,
+        'ttl_seconds': ttl_seconds,
+        'nonce': nonce,
         'geofence_required': True
     }
     raw_payload_str = json.dumps(payload, separators=(',', ':'))
@@ -791,9 +810,11 @@ def qr_generate_session():
     return jsonify({
         'status': 'success',
         'session': payload,
+        'ttl_seconds': ttl_seconds,
+        'nonce': nonce,
         'qr_data_string': raw_payload_str,
         'qr_image': b64_qr,
-        'message': f'Classroom QR session generated for {subject} (Valid for {valid_minutes} mins).'
+        'message': f'Classroom QR session generated for {subject} (Auto-rotates every {ttl_seconds}s).'
     })
 
 
@@ -898,15 +919,31 @@ def qr_verify_and_mark():
     if isinstance(parsed_qr, dict):
         if parsed_qr.get('type') == 'CLASSROOM_QR_ATTENDANCE':
             subject = parsed_qr.get('subject') or subject
-            # Check expiry
+            # Check dynamic 5-second rotation & TTL expiry
+            ttl_sec = parsed_qr.get('ttl_seconds')
+            created_at_str = parsed_qr.get('created_at')
             valid_until_str = parsed_qr.get('valid_until')
-            if valid_until_str:
+
+            if ttl_sec and created_at_str:
+                try:
+                    created_dt = datetime.datetime.fromisoformat(created_at_str)
+                    age_sec = (datetime.datetime.now() - created_dt).total_seconds()
+                    # Allow 4-5s grace for camera acquisition + mobile network latency
+                    max_allowed = float(ttl_sec) + 4.5
+                    if age_sec > max_allowed:
+                        return jsonify({
+                            'status': 'expired',
+                            'message': f"QR CODE EXPIRED: This dynamic anti-proxy QR code was only valid for {ttl_sec}s and has rotated ({age_sec:.1f}s ago). Forwarded screenshots & proxies are strictly blocked. Please scan the live QR code on screen!"
+                        }), 400
+                except Exception:
+                    pass
+            elif valid_until_str:
                 try:
                     valid_dt = datetime.datetime.fromisoformat(valid_until_str)
                     if datetime.datetime.now() > valid_dt:
                         return jsonify({
                             'status': 'expired',
-                            'message': 'This classroom QR code has expired! Please ask faculty to generate a fresh QR code.'
+                            'message': 'This classroom QR code has expired! Please scan the current live QR on screen.'
                         }), 400
                 except Exception:
                     pass

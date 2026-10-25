@@ -7,7 +7,463 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+    // ==================== QR CODE ATTENDANCE CONTROLLER ====================
+    let qrCamStream = null;
+    let qrScanInterval = null;
+    let qrCurrentFacingMode = 'environment';
+    let isQrProcessing = false;
+    let facQrCountdownTimer = null;
+
+    function openQrScannerModal() {
+      openModal('modal-qr-scanner');
+      isQrProcessing = false;
+      const resCard = document.getElementById('qr-scan-result-card');
+      if (resCard) resCard.style.display = 'none';
+
+      // Sync subject dropdown
+      const heroSubj = document.getElementById('hero-subject-select')?.value;
+      const scanSubjSelect = document.getElementById('qr-scan-subject');
+      if (heroSubj && scanSubjSelect) {
+        scanSubjSelect.value = heroSubj;
+      }
+
+      updateQrGeofenceBadge();
+      startQrCamera();
+    }
+
+    function closeQrScannerModal() {
+      stopQrCamera();
+      closeModal('modal-qr-scanner');
+    }
+
+    function updateQrGeofenceBadge() {
+      const alertBox = document.getElementById('qr-geofence-alert');
+      const alertText = document.getElementById('qr-geofence-text');
+      const alertPill = document.getElementById('qr-geofence-pill');
+      if (!alertBox || !alertText || !alertPill) return;
+
+      if (!latestDeviceCoords) {
+        alertText.innerHTML = "📍 GPS location not yet acquired. Will verify on scan.";
+        alertPill.innerText = "GPS SYNCING";
+        alertPill.style.color = "var(--amber)";
+        return;
+      }
+
+      const campusLat = 11.000563;
+      const campusLng = 76.966575;
+      const radius = 500;
+      const dist = calculateHaversineDistance(latestDeviceCoords.latitude, latestDeviceCoords.longitude, campusLat, campusLng);
+
+      if (dist <= radius) {
+        alertBox.style.background = "rgba(200, 245, 90, 0.12)";
+        alertBox.style.borderColor = "rgba(200, 245, 90, 0.35)";
+        alertText.innerHTML = `📍 <strong>Inside Campus Perimeter:</strong> ${dist.toFixed(1)}m from center.`;
+        alertPill.innerText = "IN ZONE ✅";
+        alertPill.style.color = "var(--lime)";
+      } else {
+        alertBox.style.background = "rgba(244, 63, 94, 0.15)";
+        alertBox.style.borderColor = "rgba(244, 63, 94, 0.35)";
+        alertText.innerHTML = `⚠️ <strong>Outside Geofence:</strong> ${dist.toFixed(1)}m from campus (Limit: ${radius}m).`;
+        alertPill.innerText = "OUT OF ZONE ❌";
+        alertPill.style.color = "var(--rose)";
+      }
+    }
+
+    async function startQrCamera() {
+      stopQrCamera();
+      const video = document.getElementById('qr-scan-video');
+      const placeholder = document.getElementById('qr-cam-placeholder');
+      const reticle = document.getElementById('qr-target-reticle');
+      const laser = document.getElementById('qr-laser-line');
+      const badge = document.getElementById('qr-scan-status-badge');
+      const btnStart = document.getElementById('btn-qr-start-cam');
+      const btnStop = document.getElementById('btn-qr-stop-cam');
+
+      try {
+        qrCamStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: qrCurrentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        video.srcObject = qrCamStream;
+        await video.play();
+
+        video.style.display = 'block';
+        if (placeholder) placeholder.style.display = 'none';
+        if (reticle) reticle.style.display = 'block';
+        if (laser) laser.classList.add('scanning');
+        if (badge) badge.style.display = 'flex';
+        if (btnStart) btnStart.style.display = 'none';
+        if (btnStop) btnStop.style.display = 'inline-block';
+
+        isQrProcessing = false;
+        qrScanInterval = setInterval(scanQrVideoFrame, 220);
+      } catch (err) {
+        showToast("Camera access error: " + (err.message || err.name), "error");
+        if (placeholder) placeholder.style.display = 'flex';
+        if (video) video.style.display = 'none';
+      }
+    }
+
+    function stopQrCamera() {
+      if (qrScanInterval) {
+        clearInterval(qrScanInterval);
+        qrScanInterval = null;
+      }
+      if (qrCamStream) {
+        qrCamStream.getTracks().forEach(t => t.stop());
+        qrCamStream = null;
+      }
+      const video = document.getElementById('qr-scan-video');
+      const placeholder = document.getElementById('qr-cam-placeholder');
+      const reticle = document.getElementById('qr-target-reticle');
+      const laser = document.getElementById('qr-laser-line');
+      const badge = document.getElementById('qr-scan-status-badge');
+      const btnStart = document.getElementById('btn-qr-start-cam');
+      const btnStop = document.getElementById('btn-qr-stop-cam');
+
+      if (video) video.style.display = 'none';
+      if (placeholder) placeholder.style.display = 'flex';
+      if (reticle) reticle.style.display = 'none';
+      if (laser) laser.classList.remove('scanning');
+      if (badge) badge.style.display = 'none';
+      if (btnStart) btnStart.style.display = 'inline-block';
+      if (btnStop) btnStop.style.display = 'none';
+    }
+
+    function flipQrCamera() {
+      qrCurrentFacingMode = (qrCurrentFacingMode === 'environment') ? 'user' : 'environment';
+      if (qrCamStream) {
+        startQrCamera();
+      }
+    }
+
+    async function scanQrVideoFrame() {
+      if (isQrProcessing) return;
+      const video = document.getElementById('qr-scan-video');
+      const canvas = document.getElementById('qr-scan-canvas');
+      if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const qrData = await decodeQrFromCanvas(canvas);
+      if (qrData) {
+        isQrProcessing = true;
+        document.getElementById('qr-target-reticle')?.classList.add('detected');
+        playSuccessChime();
+        await handleScannedQrCode(qrData);
+      }
+    }
+
+    async function decodeQrFromCanvas(canvas) {
+      // 1. Native BarcodeDetector (GPU accelerated)
+      if ('BarcodeDetector' in window) {
+        try {
+          const detector = new BarcodeDetector({ formats: ['qr_code'] });
+          const barcodes = await detector.detect(canvas);
+          if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+            return barcodes[0].rawValue;
+          }
+        } catch(e) {}
+      }
+
+      // 2. Client-side jsQR library
+      if (typeof jsQR !== 'undefined') {
+        try {
+          const ctx = canvas.getContext('2d');
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: "dontInvert" });
+          if (code && code.data) {
+            return code.data;
+          }
+        } catch(e) {}
+      }
+
+      // 3. Periodic backend OpenCV fallback
+      if (Math.random() < 0.25) {
+        try {
+          const base64Img = canvas.toDataURL('image/jpeg', 0.85);
+          const res = await fetch('/api/qr/decode_frame', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ image: base64Img })
+          });
+          if (res.ok) {
+            const d = await res.json();
+            if (d.detected && d.data) return d.data;
+          }
+        } catch(e) {}
+      }
+
+      return null;
+    }
+
+    async function handleQrFileUpload(input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const img = new Image();
+        img.onload = async () => {
+          const canvas = document.getElementById('qr-scan-canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+
+          showToast("Analyzing uploaded QR code screenshot...", "info");
+          const qrData = await decodeQrFromCanvas(canvas);
+          if (qrData) {
+            playSuccessChime();
+            await handleScannedQrCode(qrData);
+          } else {
+            showToast("No readable QR code found in uploaded image. Please try a clearer picture.", "error");
+          }
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function handleScannedQrCode(qrString) {
+      const studentRoll = currentUser?.roll_number || currentUser?.username;
+      const subject = document.getElementById('qr-scan-subject')?.value || 'Machine Learning & AI';
+      const lat = latestDeviceCoords?.latitude;
+      const lng = latestDeviceCoords?.longitude;
+
+      if (!studentRoll) {
+        showToast("Please log in as a student before scanning attendance.", "error");
+        isQrProcessing = false;
+        return;
+      }
+
+      let serverResult = null;
+      try {
+        const res = await fetch('/api/qr/verify_and_mark', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            qr_data: qrString,
+            student_roll: studentRoll,
+            subject: subject,
+            latitude: lat,
+            longitude: lng
+          })
+        });
+        serverResult = await res.json();
+      } catch(e) {}
+
+      // Check geofence violation
+      if (serverResult && serverResult.status === 'geofence_denied') {
+        showToast(serverResult.message, "error");
+        const resCard = document.getElementById('qr-scan-result-card');
+        if (resCard) {
+          resCard.style.display = 'block';
+          resCard.style.background = 'rgba(244, 63, 94, 0.15)';
+          resCard.style.borderColor = 'var(--rose)';
+          document.getElementById('qr-res-title').innerText = 'Geofence Violation ⚠️';
+          document.getElementById('qr-res-title').style.color = 'var(--rose)';
+          document.getElementById('qr-res-detail').innerText = serverResult.message;
+        }
+        setTimeout(() => { isQrProcessing = false; }, 3000);
+        return;
+      }
+
+      // Check expired session
+      if (serverResult && serverResult.status === 'expired') {
+        showToast(serverResult.message, "error");
+        setTimeout(() => { isQrProcessing = false; }, 3000);
+        return;
+      }
+
+      // Log locally for Vercel static support
+      logLocalAttendance(studentRoll, subject, 'qr_scan');
+
+      // Visual confirmation & Confetti
+      launchConfetti();
+      const resCard = document.getElementById('qr-scan-result-card');
+      if (resCard) {
+        resCard.style.display = 'block';
+        resCard.style.background = 'rgba(200, 245, 90, 0.15)';
+        resCard.style.borderColor = 'var(--lime)';
+        document.getElementById('qr-res-title').innerText = 'QR Attendance Confirmed! ✅';
+        document.getElementById('qr-res-title').style.color = 'var(--lime)';
+        document.getElementById('qr-res-detail').innerText = `Present recorded for ${subject} on ${new Date().toLocaleDateString()} (${studentRoll})`;
+      }
+
+      showToast(`Attendance marked Present for ${subject} via QR Scan!`, "success");
+      loadDashboardData();
+
+      setTimeout(() => {
+        isQrProcessing = false;
+        document.getElementById('qr-target-reticle')?.classList.remove('detected');
+      }, 4000);
+    }
+
+    async function openClassroomQrModal() {
+      openModal('modal-classroom-qr');
+      const facSubj = currentUser?.subject || 'Machine Learning & AI';
+      const subjSelect = document.getElementById('fac-qr-subject');
+      if (subjSelect) subjSelect.value = facSubj;
+      await generateClassroomQrSession();
+    }
+
+    async function generateClassroomQrSession() {
+      const subject = document.getElementById('fac-qr-subject')?.value || 'Machine Learning & AI';
+      const validMins = parseInt(document.getElementById('fac-qr-validity')?.value || '15', 10);
+      const facName = currentUser?.name || 'Prof. Robert Vance';
+
+      document.getElementById('proj-subject-title').innerText = subject;
+      const codeSpan = document.getElementById('proj-session-code');
+      const randomToken = Math.random().toString(36).substring(2, 7).toUpperCase();
+      const sessionCode = `SES-${subject.substring(0,2).toUpperCase()}-${randomToken}`;
+      if (codeSpan) codeSpan.innerText = sessionCode;
+
+      let qrImageUrl = '';
+      try {
+        const res = await fetch('/api/qr/generate_session', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ subject: subject, valid_minutes: validMins, faculty_name: facName })
+        });
+        if (res.ok) {
+          const d = await res.json();
+          qrImageUrl = d.qr_image;
+        }
+      } catch(e) {}
+
+      // Fallback for Vercel static support
+      if (!qrImageUrl) {
+        const payloadObj = {
+          type: 'CLASSROOM_QR_ATTENDANCE',
+          session_id: sessionCode,
+          subject: subject,
+          faculty: facName,
+          date: new Date().toISOString().substring(0, 10),
+          valid_until: new Date(Date.now() + validMins * 60000).toISOString(),
+          geofence_required: true
+        };
+        const encoded = encodeURIComponent(JSON.stringify(payloadObj));
+        qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encoded}&bgcolor=ffffff&color=0f172a`;
+      }
+
+      const imgElem = document.getElementById('fac-qr-img');
+      if (imgElem) imgElem.src = qrImageUrl;
+
+      startFacQrCountdown(validMins * 60);
+    }
+
+    function startFacQrCountdown(totalSeconds) {
+      if (facQrCountdownTimer) clearInterval(facQrCountdownTimer);
+      let remaining = totalSeconds;
+
+      function tick() {
+        const mins = Math.floor(remaining / 60);
+        const secs = remaining % 60;
+        const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')} remaining`;
+        const timerText = document.getElementById('fac-qr-timer-text');
+        const bar = document.getElementById('fac-qr-progress-bar');
+
+        if (timerText) timerText.innerText = timeStr;
+        if (bar) bar.style.width = `${(remaining / totalSeconds) * 100}%`;
+
+        if (remaining <= 0) {
+          clearInterval(facQrCountdownTimer);
+          if (timerText) timerText.innerText = "EXPIRED (Token Stale)";
+          if (bar) bar.style.width = "0%";
+          showToast("Classroom QR session expired. Click 'Rotate Token' to refresh.", "warning");
+        }
+        remaining--;
+      }
+
+      tick();
+      facQrCountdownTimer = setInterval(tick, 1000);
+    }
+
+    function downloadClassroomQr() {
+      const img = document.getElementById('fac-qr-img');
+      if (!img || !img.src) return;
+      const a = document.createElement('a');
+      a.href = img.src;
+      a.download = `Classroom_QR_${document.getElementById('fac-qr-subject')?.value || 'Attendance'}.png`;
+      a.click();
+      showToast("Classroom QR Image downloaded!", "success");
+    }
+
+    function printClassroomQr() {
+      const img = document.getElementById('fac-qr-img');
+      const subject = document.getElementById('fac-qr-subject')?.value || 'Machine Learning & AI';
+      if (!img) return;
+
+      const printWin = window.open('', '_blank');
+      printWin.document.write(`
+        <html>
+          <head><title>Print Classroom QR - ${subject}</title></head>
+          <body style="font-family: sans-serif; text-align: center; padding: 40px;">
+            <h2>University Engineering Portal</h2>
+            <h3>Official Classroom Attendance QR Code</h3>
+            <p style="font-size: 1.2rem; font-weight: bold;">Course: ${subject}</p>
+            <p>Scan with your phone's Smart Attendance Portal to mark attendance.</p>
+            <img src="${img.src}" style="width: 320px; height: 320px; border: 4px solid black; margin: 20px 0;" />
+            <p style="color: #666; font-size: 0.9rem;">Protected by Campus Geofencing. Must be scanned in lecture hall.</p>
+          </body>
+        </html>
+      `);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => { printWin.print(); }, 500);
+    }
+
+    async function openStudentQrBadgeModal() {
+      openModal('modal-student-qr-badge');
+      const roll = currentUser?.roll_number || currentUser?.username || 'STU101';
+      const name = currentUser?.name || 'Enrolled Student';
+      const dept = currentUser?.department || 'CSE';
+
+      document.getElementById('badge-student-name').innerText = name;
+      document.getElementById('badge-student-roll').innerText = roll;
+      document.getElementById('badge-student-dept').innerText = `${dept} · 3rd Year`;
+
+      const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'ST';
+      document.getElementById('badge-avatar-initials').innerText = initials;
+
+      let badgeQrUrl = '';
+      try {
+        const res = await fetch('/api/qr/generate_student_badge', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ roll_number: roll, name: name, department: dept })
+        });
+        if (res.ok) {
+          const d = await res.json();
+          badgeQrUrl = d.qr_image;
+        }
+      } catch(e) {}
+
+      if (!badgeQrUrl) {
+        const badgePayload = { type: 'STUDENT_ID_BADGE', roll_number: roll, name: name, department: dept };
+        const encoded = encodeURIComponent(JSON.stringify(badgePayload));
+        badgeQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encoded}&bgcolor=ffffff&color=090d16`;
+      }
+
+      const qrImg = document.getElementById('badge-qr-img');
+      if (qrImg) qrImg.src = badgeQrUrl;
+    }
+
+    function downloadStudentBadge() {
+      const qrImg = document.getElementById('badge-qr-img');
+      if (!qrImg || !qrImg.src) return;
+      const a = document.createElement('a');
+      a.href = qrImg.src;
+      a.download = `Student_ID_QR_${currentUser?.roll_number || 'Badge'}.png`;
+      a.click();
+      showToast("Student ID Badge QR downloaded!", "success");
+    }
+
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 
   <style>
@@ -1560,7 +2016,142 @@
       .bottom-grid { grid-template-columns: 1fr; }
       .hero-main-title h1 { font-size: 2.2rem; }
     }
+  
+    /* ==================== QR ATTENDANCE STYLES ==================== */
+    .qr-hud-viewport {
+      width: 100%;
+      height: 380px;
+      border-radius: 24px;
+      background: #04070e;
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid var(--card-border);
+      margin-bottom: 16px;
+      box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.85);
+    }
+    .qr-hud-viewport video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .qr-target-reticle {
+      position: absolute;
+      width: 230px;
+      height: 230px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border: 2px dashed rgba(200, 245, 90, 0.45);
+      border-radius: 20px;
+      pointer-events: none;
+      z-index: 12;
+      box-shadow: 0 0 0 9999px rgba(4, 7, 14, 0.55);
+      transition: all 0.3s ease;
+    }
+    .qr-target-reticle.detected {
+      border-color: var(--lime);
+      box-shadow: 0 0 25px var(--lime), 0 0 0 9999px rgba(4, 7, 14, 0.45);
+    }
+    .qr-target-corner {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+      border-color: var(--lime);
+      border-style: solid;
+      border-width: 0;
+    }
+    .qr-target-corner.tl { top: -2px; left: -2px; border-top-width: 4px; border-left-width: 4px; border-top-left-radius: 18px; }
+    .qr-target-corner.tr { top: -2px; right: -2px; border-top-width: 4px; border-right-width: 4px; border-top-right-radius: 18px; }
+    .qr-target-corner.bl { bottom: -2px; left: -2px; border-bottom-width: 4px; border-left-width: 4px; border-bottom-left-radius: 18px; }
+    .qr-target-corner.br { bottom: -2px; right: -2px; border-bottom-width: 4px; border-right-width: 4px; border-bottom-right-radius: 18px; }
+
+    .qr-sweep-laser {
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      height: 3px;
+      background: linear-gradient(90deg, transparent 0%, var(--lime) 50%, transparent 100%);
+      box-shadow: 0 0 16px var(--lime), 0 0 32px var(--cyan);
+      opacity: 0;
+      z-index: 13;
+      pointer-events: none;
+    }
+    .qr-sweep-laser.scanning {
+      opacity: 1;
+      animation: qrLaserSweep 2.0s infinite ease-in-out alternate;
+    }
+    @keyframes qrLaserSweep {
+      0% { top: 8%; opacity: 0.3; }
+      50% { opacity: 1; }
+      100% { top: 92%; opacity: 0.3; }
+    }
+
+    /* PROJECTOR DISPLAY CARD FOR CLASSROOM QR */
+    .qr-projector-card {
+      background: linear-gradient(145deg, rgba(20, 27, 45, 0.95), rgba(10, 14, 25, 0.98));
+      border: 1px solid var(--card-border-glow);
+      border-radius: 28px;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.6), 0 0 30px rgba(200, 245, 90, 0.12);
+      position: relative;
+    }
+    .qr-image-frame {
+      width: 280px;
+      height: 280px;
+      background: #ffffff;
+      border-radius: 20px;
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 25px rgba(200, 245, 90, 0.25);
+      margin-bottom: 20px;
+      border: 4px solid var(--lime);
+    }
+    .qr-image-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      image-rendering: pixelated;
+    }
+
+    /* STUDENT DIGITAL ID CARD */
+    .student-digital-badge {
+      width: 100%;
+      max-width: 380px;
+      margin: 0 auto;
+      background: linear-gradient(135deg, #090e1a 0%, #151e32 100%);
+      border: 1.5px solid rgba(200, 245, 90, 0.35);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.6), 0 0 25px rgba(56, 189, 248, 0.15);
+      position: relative;
+      overflow: hidden;
+    }
+    .badge-hologram-strip {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 6px;
+      background: linear-gradient(90deg, #c8f55a, #38bdf8, #a855f7, #c8f55a);
+      background-size: 200% auto;
+      animation: holoGlow 3s linear infinite;
+    }
+    @keyframes holoGlow {
+      0% { background-position: 0% center; }
+      100% { background-position: 200% center; }
+    }
+
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 </head>
 <body>
 
@@ -1580,6 +2171,11 @@
       <!-- Dark/Light Theme Toggle -->
       <button type="button" class="top-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
         <span id="theme-toggle-icon">🌙</span> <span id="theme-toggle-txt">Dark</span>
+      </button>
+
+            <!-- QR Attendance Button -->
+      <button type="button" class="top-btn" onclick="openQrScannerModal()" title="Classroom QR Attendance Scanner" style="background: rgba(163, 230, 53, 0.15); border-color: rgba(163, 230, 53, 0.4); color: var(--lime); font-weight: 700;">
+        📱 QR Scanner
       </button>
 
       <!-- Audio Mute Toggle -->
@@ -1720,8 +2316,10 @@
             </div>
           </div>
           <div class="quick-btn-group">
-            <button type="button" class="btn-quick" onclick="openFaceSampleModal()">Enroll Samples 📸</button>
-            <button type="button" class="btn-quick btn-lime-cta" onclick="openFaceAiModal()">Scan Face 🔍</button>
+            <button type="button" class="btn-quick btn-lime-cta" onclick="openQrScannerModal()">📷 Scan QR</button>
+            <button type="button" class="btn-quick" onclick="openStudentQrBadgeModal()">🪪 My QR Badge</button>
+            <button type="button" class="btn-quick" onclick="openFaceSampleModal()">Enroll 📸</button>
+            <button type="button" class="btn-quick" onclick="openFaceAiModal()">Scan Face 🔍</button>
           </div>
         </div>
       </div>
@@ -1887,6 +2485,9 @@
       </div>
 
       <div class="faculty-actions">
+        <button type="button" class="btn-bento-lime" onclick="openClassroomQrModal()" style="background: linear-gradient(135deg, #a3e635, #38bdf8); color: #0f172a; font-weight: 800;">
+          📱 Dynamic Classroom QR
+        </button>
         <button type="button" class="btn-bento-lime" onclick="launchClassroomKiosk()">
           🚀 Launch Classroom Kiosk Scanner
         </button>
@@ -2517,6 +3118,256 @@
     </div>
   </div>
 
+  
+  <!-- ==================== 9. CLASSROOM QR ATTENDANCE SCANNER MODAL ==================== -->
+  <div id="modal-qr-scanner" class="modal-backdrop">
+    <div class="modal-bento-dialog" style="max-width: 580px;">
+      <div class="modal-header">
+        <div>
+          <h3>📷 Classroom QR Attendance Scanner</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">
+            Point your camera at the professor's projected QR code or upload a QR image
+          </p>
+        </div>
+        <button type="button" class="modal-close-icon" onclick="closeQrScannerModal()">✕</button>
+      </div>
+
+      <!-- GEOFENCE RADAR BADGE INSIDE SCANNER -->
+      <div id="qr-geofence-alert" style="margin-bottom: 14px; padding: 10px 14px; border-radius: 12px; background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.3); font-size: 0.8rem; display: flex; align-items: center; justify-content: space-between;">
+        <span id="qr-geofence-text">📍 Checking GPS location within campus perimeter...</span>
+        <span id="qr-geofence-pill" style="font-weight: 800; font-size: 0.72rem; padding: 2px 8px; border-radius: 99px; background: rgba(200,245,90,0.2); color: var(--lime);">
+          GPS SYNC
+        </span>
+      </div>
+
+      <!-- SUBJECT SELECTOR FOR QR ATTENDANCE -->
+      <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 10px; margin-bottom: 14px;">
+        <div>
+          <label class="form-label" style="font-size: 0.74rem;">Lecture Subject</label>
+          <select id="qr-scan-subject" class="form-input">
+            <option value="Machine Learning & AI">Machine Learning & AI</option>
+            <option value="Database Systems">Database Systems</option>
+            <option value="Data Structures">Data Structures</option>
+            <option value="Web Technologies">Web Technologies</option>
+            <option value="Python Programming">Python Programming</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label" style="font-size: 0.74rem;">Scanner Camera</label>
+          <button type="button" class="btn-bento-secondary" onclick="flipQrCamera()" style="width: 100%; padding: 8px 10px; font-size: 0.8rem;">
+            🔄 Switch Lens
+          </button>
+        </div>
+      </div>
+
+      <!-- CAMERA HUD VIEWPORT -->
+      <div class="qr-hud-viewport" id="qr-hud-viewport">
+        <video id="qr-scan-video" autoplay playsinline muted style="display: none;"></video>
+        <canvas id="qr-scan-canvas" style="display: none;"></canvas>
+
+        <!-- Idle Placeholder -->
+        <div id="qr-cam-placeholder" class="webcam-idle-placeholder">
+          <span style="font-size: 3rem;">📱</span>
+          <p style="font-size: 0.9rem; font-weight: 600; color: var(--text-main); margin-top: 8px;">
+            Camera is currently idle
+          </p>
+          <p style="font-size: 0.76rem; color: var(--text-muted); max-width: 280px; margin-top: 4px;">
+            Click 'Start Camera' below to scan the classroom session QR code.
+          </p>
+        </div>
+
+        <!-- Targeting Reticle & Scanning Laser -->
+        <div class="qr-target-reticle" id="qr-target-reticle" style="display: none;">
+          <div class="qr-target-corner tl"></div>
+          <div class="qr-target-corner tr"></div>
+          <div class="qr-target-corner bl"></div>
+          <div class="qr-target-corner br"></div>
+          <div class="qr-sweep-laser" id="qr-laser-line"></div>
+        </div>
+
+        <!-- Scanner Status Badge -->
+        <div class="hud-status-badge" id="qr-scan-status-badge" style="display: none;">
+          <span class="hud-radar-dot"></span>
+          <span id="qr-scan-status-text">SCANNER ACTIVE</span>
+        </div>
+      </div>
+
+      <!-- RESULT / FEEDBACK BANNER -->
+      <div id="qr-scan-result-card" style="display: none; margin-bottom: 16px; padding: 14px; border-radius: 14px; background: rgba(200,245,90,0.12); border: 1.5px solid var(--lime);">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+          <span style="font-size: 1.4rem;">🎉</span>
+          <div>
+            <h4 style="margin: 0; font-size: 0.95rem; font-weight: 800; color: var(--lime);" id="qr-res-title">Attendance Confirmed!</h4>
+            <p style="margin: 0; font-size: 0.78rem; color: var(--text-main);" id="qr-res-detail">Marked Present for Machine Learning & AI</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONTROLS -->
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button type="button" class="btn-bento-lime" id="btn-qr-start-cam" onclick="startQrCamera()" style="flex: 1.5;">
+          📸 Start Camera
+        </button>
+        <button type="button" class="btn-bento-secondary" id="btn-qr-stop-cam" onclick="stopQrCamera()" style="display: none; flex: 1;">
+          ⏹️ Stop Camera
+        </button>
+        <label class="btn-bento-secondary" style="flex: 1.2; text-align: center; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+          📁 Upload QR
+          <input type="file" accept="image/*" onchange="handleQrFileUpload(this)" style="display: none;">
+        </label>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ==================== 10. FACULTY DYNAMIC CLASSROOM QR PROJECTOR MODAL ==================== -->
+  <div id="modal-classroom-qr" class="modal-backdrop">
+    <div class="modal-bento-dialog" style="max-width: 620px;">
+      <div class="modal-header">
+        <div>
+          <h3>📱 Dynamic Classroom Attendance QR Code</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">
+            Project this dynamic QR code on the lecture hall screen for students to check in
+          </p>
+        </div>
+        <button type="button" class="modal-close-icon" onclick="closeModal('modal-classroom-qr')">✕</button>
+      </div>
+
+      <!-- CONFIGURATION STRIP -->
+      <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 10px; margin-bottom: 20px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 14px; border: 1px solid var(--card-border);">
+        <div>
+          <label class="form-label" style="font-size: 0.72rem;">Course Subject</label>
+          <select id="fac-qr-subject" class="form-input" onchange="generateClassroomQrSession()">
+            <option value="Machine Learning & AI">Machine Learning & AI</option>
+            <option value="Database Systems">Database Systems</option>
+            <option value="Data Structures">Data Structures</option>
+            <option value="Web Technologies">Web Technologies</option>
+            <option value="Python Programming">Python Programming</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label" style="font-size: 0.72rem;">Token Validity</label>
+          <select id="fac-qr-validity" class="form-input" onchange="generateClassroomQrSession()">
+            <option value="5">5 Minutes</option>
+            <option value="15" selected>15 Minutes</option>
+            <option value="30">30 Minutes</option>
+            <option value="60">1 Hour</option>
+          </select>
+        </div>
+        <div style="display: flex; align-items: flex-end;">
+          <button type="button" class="btn-bento-secondary" onclick="generateClassroomQrSession()" style="width: 100%; height: 38px; font-size: 0.78rem;">
+            🔄 Rotate Token
+          </button>
+        </div>
+      </div>
+
+      <!-- MAIN PROJECTOR DISPLAY CARD -->
+      <div class="qr-projector-card">
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 16px;">
+          <div style="text-align: left;">
+            <span style="font-size: 0.7rem; font-family: var(--font-mono); color: var(--lime); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;">
+              OFFICIAL ATTENDANCE TOKEN
+            </span>
+            <h4 style="margin: 2px 0 0; font-size: 1.15rem; color: #ffffff;" id="proj-subject-title">Machine Learning & AI</h4>
+          </div>
+          <span style="font-size: 0.74rem; background: rgba(200,245,90,0.18); color: var(--lime); padding: 4px 12px; border-radius: 99px; font-weight: 800;" id="proj-session-code">
+            SES-ML-ACTIVE
+          </span>
+        </div>
+
+        <!-- High-Resolution QR Frame -->
+        <div class="qr-image-frame" id="fac-qr-frame">
+          <img id="fac-qr-img" src="" alt="Classroom QR Code">
+        </div>
+
+        <!-- Live Countdown Timer -->
+        <div style="width: 100%; max-width: 320px; margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; font-size: 0.78rem; font-weight: 700; margin-bottom: 6px;">
+            <span style="color: var(--text-muted);">Session Expiry:</span>
+            <span style="color: var(--cyan); font-family: var(--font-mono);" id="fac-qr-timer-text">14:59 remaining</span>
+          </div>
+          <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 99px; overflow: hidden;">
+            <div id="fac-qr-progress-bar" style="width: 100%; height: 100%; background: linear-gradient(90deg, var(--lime), var(--cyan)); transition: width 1s linear;"></div>
+          </div>
+        </div>
+
+        <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0; line-height: 1.4;">
+          🛡️ <em>Geofence Protected:</em> Students must be physically located within 500m of the campus to verify attendance.
+        </p>
+      </div>
+
+      <!-- ACTION BUTTONS -->
+      <div style="display: flex; gap: 10px; margin-top: 18px;">
+        <button type="button" class="btn-bento-lime" onclick="downloadClassroomQr()" style="flex: 1;">
+          ⬇️ Download QR Image
+        </button>
+        <button type="button" class="btn-bento-cyan" onclick="printClassroomQr()" style="flex: 1;">
+          🖨️ Print for Classroom Door
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ==================== 11. STUDENT DIGITAL IDENTITY QR BADGE MODAL ==================== -->
+  <div id="modal-student-qr-badge" class="modal-backdrop">
+    <div class="modal-bento-dialog" style="max-width: 460px;">
+      <div class="modal-header">
+        <div>
+          <h3>🪪 Student Biometric Digital QR ID</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">
+            Official university digital credential with biometric identity QR
+          </p>
+        </div>
+        <button type="button" class="modal-close-icon" onclick="closeModal('modal-student-qr-badge')">✕</button>
+      </div>
+
+      <!-- BADGE CARD -->
+      <div class="student-digital-badge" id="student-badge-card">
+        <div class="badge-hologram-strip"></div>
+        
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; margin-top: 6px;">
+          <div>
+            <h5 style="margin: 0; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; color: var(--cyan); text-transform: uppercase;">
+              UNIVERSITY PORTAL CREDENTIAL
+            </h5>
+            <h4 style="margin: 2px 0 0; font-size: 0.95rem; color: #ffffff;">Engineering Identity Card</h4>
+          </div>
+          <span style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px; background: rgba(200,245,90,0.15); color: var(--lime); font-weight: 800;">
+            VERIFIED
+          </span>
+        </div>
+
+        <div style="display: flex; gap: 16px; align-items: center; margin-bottom: 20px;">
+          <div style="width: 72px; height: 72px; border-radius: 18px; background: linear-gradient(135deg, var(--lime), var(--cyan)); display: flex; align-items: center; justify-content: center; font-size: 1.6rem; font-weight: 900; color: #0f172a; flex-shrink: 0;" id="badge-avatar-initials">
+            ST
+          </div>
+          <div style="text-align: left;">
+            <h3 style="margin: 0; font-size: 1.15rem; color: #ffffff;" id="badge-student-name">Student Name</h3>
+            <p style="margin: 2px 0 0; font-family: var(--font-mono); font-size: 0.84rem; color: var(--lime); font-weight: 800;" id="badge-student-roll">STU101</p>
+            <p style="margin: 2px 0 0; font-size: 0.74rem; color: var(--text-muted);" id="badge-student-dept">Computer Science & AI · 3rd Year</p>
+          </div>
+        </div>
+
+        <!-- Student Personal QR Code -->
+        <div style="background: #ffffff; border-radius: 16px; padding: 12px; width: 190px; height: 190px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; border: 3px solid var(--lime);">
+          <img id="badge-qr-img" src="" alt="Student ID QR" style="width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated;">
+        </div>
+
+        <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--text-muted); border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
+          <span>Status: <strong>Active Enrolled</strong></span>
+          <span>Academic Year: <strong>2026-2027</strong></span>
+        </div>
+      </div>
+
+      <div style="margin-top: 18px;">
+        <button type="button" class="btn-bento-lime" onclick="downloadStudentBadge()" style="width: 100%;">
+          ⬇️ Save Digital ID Badge
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- TOAST NOTIFICATION -->
   <div id="toast-banner">
     <span id="toast-icon">✅</span>
@@ -2647,7 +3498,7 @@
       return [];
     }
 
-    function logLocalAttendance(roll, subject) {
+    function logLocalAttendance(roll, subject, source = 'face_ai') {
       const roster = getLocalStudents();
       const st = roster.find(s => s.roll_number === roll);
       if (st) {
@@ -2663,7 +3514,7 @@
         date: new Date().toISOString().substring(0, 10),
         time: new Date().toLocaleTimeString(),
         status: 'Present',
-        source: 'face_ai'
+        source: source || 'face_ai'
       });
       localStorage.setItem('sa_att_records', JSON.stringify(attLog.slice(0, 100)));
     }

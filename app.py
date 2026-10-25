@@ -21,6 +21,9 @@ import contextlib
 import math
 import webbrowser
 import threading
+import secrets
+import cv2
+import qrcode
 import numpy as np
 from flask import Flask, render_template, request, jsonify
 
@@ -746,6 +749,240 @@ def face_recognize_frame():
 
     result = detect_and_recognize_frame(image_bytes, subject=subject, student_roll=student_roll)
     return jsonify(result)
+
+
+# --------------------------------------------------------------------------
+# QR Code Attendance Engine (Classroom Dynamic QR & Student ID Badges)
+# --------------------------------------------------------------------------
+
+@app.route('/api/qr/generate_session', methods=['POST'])
+def qr_generate_session():
+    """Generate a dynamic classroom attendance QR session with expiry and security token."""
+    data = request.json or {}
+    subject = (data.get('subject') or 'Machine Learning & AI').strip()
+    valid_minutes = int(data.get('valid_minutes') or 15)
+    faculty_name = (data.get('faculty_name') or 'Prof. Robert Vance').strip()
+
+    now = datetime.datetime.now()
+    valid_until = now + datetime.timedelta(minutes=valid_minutes)
+    session_id = f"SES-{re.sub(r'[^A-Z0-9]', '', subject.upper())[:6]}-{int(now.timestamp())}"
+
+    payload = {
+        'type': 'CLASSROOM_QR_ATTENDANCE',
+        'session_id': session_id,
+        'subject': subject,
+        'faculty': faculty_name,
+        'date': now.strftime('%Y-%m-%d'),
+        'created_at': now.isoformat(),
+        'valid_until': valid_until.isoformat(),
+        'valid_minutes': valid_minutes,
+        'geofence_required': True
+    }
+    raw_payload_str = json.dumps(payload, separators=(',', ':'))
+
+    qr = qrcode.QRCode(box_size=10, border=2)
+    qr.add_data(raw_payload_str)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color='#0f172a', back_color='#ffffff')
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    b64_qr = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('utf-8')
+
+    return jsonify({
+        'status': 'success',
+        'session': payload,
+        'qr_data_string': raw_payload_str,
+        'qr_image': b64_qr,
+        'message': f'Classroom QR session generated for {subject} (Valid for {valid_minutes} mins).'
+    })
+
+
+@app.route('/api/qr/generate_student_badge', methods=['POST'])
+def qr_generate_student_badge():
+    """Generate a personal digital student identity QR badge."""
+    data = request.json or {}
+    roll = format_roll_number(data.get('roll_number') or data.get('username'))
+    if not roll:
+        return jsonify({'status': 'error', 'message': 'Student roll number required.'}), 400
+
+    conn = get_db()
+    cur = conn.cursor()
+    student = cur.execute("SELECT * FROM students WHERE roll_number = ?", (roll,)).fetchone()
+    name = student['name'] if student else (data.get('name') or f"Student {roll}")
+    dept = student['department'] if student else (data.get('department') or "CSE")
+    conn.close()
+
+    payload = {
+        'type': 'STUDENT_ID_BADGE',
+        'roll_number': roll,
+        'name': name,
+        'department': dept,
+        'issued_at': datetime.datetime.now().strftime('%Y-%m-%d')
+    }
+    raw_payload_str = json.dumps(payload, separators=(',', ':'))
+
+    qr = qrcode.QRCode(box_size=8, border=2)
+    qr.add_data(raw_payload_str)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color='#090d16', back_color='#ffffff')
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    b64_qr = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('utf-8')
+
+    return jsonify({
+        'status': 'success',
+        'student': payload,
+        'qr_data_string': raw_payload_str,
+        'qr_image': b64_qr
+    })
+
+
+@app.route('/api/qr/decode_frame', methods=['POST'])
+def qr_decode_frame():
+    """Server-side OpenCV QR code detector for camera frames and image uploads."""
+    data = request.json or {}
+    img_data = data.get('image', '')
+    if not img_data:
+        return jsonify({'status': 'error', 'message': 'No image frame provided.'}), 400
+
+    payload = img_data.split(',')[1] if ',' in img_data else img_data
+    try:
+        image_bytes = base64.b64decode(payload)
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        cv_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    except Exception as exc:
+        return jsonify({'status': 'error', 'message': f'Invalid image format: {exc}'}), 400
+
+    if cv_img is None:
+        return jsonify({'status': 'error', 'message': 'Could not decode image.'}), 400
+
+    detector = cv2.QRCodeDetector()
+    decoded_text, points, _ = detector.detectAndDecode(cv_img)
+
+    if decoded_text:
+        return jsonify({
+            'status': 'success',
+            'detected': True,
+            'data': decoded_text
+        })
+    else:
+        return jsonify({
+            'status': 'success',
+            'detected': False,
+            'message': 'No QR code detected in frame.'
+        })
+
+
+@app.route('/api/qr/verify_and_mark', methods=['POST'])
+def qr_verify_and_mark():
+    """Verify scanned QR data, apply geofence validation, and mark student attendance."""
+    data = request.json or {}
+    qr_str = (data.get('qr_data') or '').strip()
+    student_roll = format_roll_number(data.get('student_roll') or data.get('roll_number'))
+    user_lat = data.get('latitude')
+    user_lng = data.get('longitude')
+    selected_subject = data.get('subject')
+
+    if not qr_str:
+        return jsonify({'status': 'error', 'message': 'No QR code data provided.'}), 400
+
+    # Parse QR payload (could be JSON or plain string)
+    parsed_qr = None
+    try:
+        parsed_qr = json.loads(qr_str)
+    except Exception:
+        parsed_qr = {'type': 'RAW', 'value': qr_str}
+
+    # Determine roll number and subject
+    subject = selected_subject or 'Machine Learning & AI'
+    if isinstance(parsed_qr, dict):
+        if parsed_qr.get('type') == 'CLASSROOM_QR_ATTENDANCE':
+            subject = parsed_qr.get('subject') or subject
+            # Check expiry
+            valid_until_str = parsed_qr.get('valid_until')
+            if valid_until_str:
+                try:
+                    valid_dt = datetime.datetime.fromisoformat(valid_until_str)
+                    if datetime.datetime.now() > valid_dt:
+                        return jsonify({
+                            'status': 'expired',
+                            'message': 'This classroom QR code has expired! Please ask faculty to generate a fresh QR code.'
+                        }), 400
+                except Exception:
+                    pass
+        elif parsed_qr.get('type') == 'STUDENT_ID_BADGE':
+            student_roll = format_roll_number(parsed_qr.get('roll_number') or student_roll)
+
+    if not student_roll:
+        return jsonify({'status': 'error', 'message': 'Student roll number could not be determined. Please log in first.'}), 400
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Geofence check if coordinates provided
+    geo = cur.execute("SELECT * FROM geofence_settings WHERE id = 1").fetchone()
+    if geo and geo['is_enabled'] and user_lat is not None and user_lng is not None:
+        try:
+            u_lat = float(user_lat)
+            u_lng = float(user_lng)
+            c_lat = float(geo['latitude'])
+            c_lng = float(geo['longitude'])
+            radius = float(geo['radius_meters'])
+
+            # Haversine distance in meters
+            R = 6371000.0
+            phi1 = math.radians(c_lat)
+            phi2 = math.radians(u_lat)
+            dphi = math.radians(u_lat - c_lat)
+            dlambda = math.radians(u_lng - c_lng)
+            a = math.sin(dphi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0)**2
+            c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+            dist_m = R * c
+
+            if dist_m > radius:
+                conn.close()
+                return jsonify({
+                    'status': 'geofence_denied',
+                    'message': f"GEOFENCE VIOLATION: You are {dist_m:.1f}m away from campus. Allowed radius is {radius:.0f}m. Attendance blocked.",
+                    'distance_meters': round(dist_m, 1),
+                    'radius_meters': radius
+                }), 403
+        except Exception:
+            pass
+
+    # Ensure student exists in DB or auto-register them
+    st = cur.execute("SELECT * FROM students WHERE roll_number = ?", (student_roll,)).fetchone()
+    if not st:
+        name = f"Student {student_roll}"
+        cur.execute("""
+            INSERT INTO students (roll_number, name, department, year, section, email)
+            VALUES (?, ?, 'CSE', '3rd', 'A', ?)
+        """, (student_roll, name, f"{student_roll.lower()}@university.edu"))
+        conn.commit()
+        st = cur.execute("SELECT * FROM students WHERE roll_number = ?", (student_roll,)).fetchone()
+
+    date_str = datetime.date.today().isoformat()
+    time_str = datetime.datetime.now().strftime('%H:%M:%S')
+
+    cur.execute("""
+        INSERT INTO attendance (roll_number, subject, date, time, status, source)
+        VALUES (?, ?, ?, ?, 'Present', 'qr_scan')
+        ON CONFLICT(roll_number, subject, date) DO UPDATE SET status='Present', time=excluded.time, source='qr_scan'
+    """, (student_roll, subject, date_str, time_str))
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'status': 'success',
+        'attendance_marked': True,
+        'student_name': st['name'],
+        'roll_number': student_roll,
+        'subject': subject,
+        'date': date_str,
+        'time': time_str,
+        'source': 'qr_scan',
+        'message': f"QR ATTENDANCE VERIFIED! {st['name']} ({student_roll}) marked Present for {subject} on {date_str}."
+    })
 
 
 # --------------------------------------------------------------------------

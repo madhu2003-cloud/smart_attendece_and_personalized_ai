@@ -82,7 +82,7 @@ def init_db():
             date        TEXT NOT NULL,          -- YYYY-MM-DD
             time        TEXT NOT NULL,          -- HH:MM:SS
             status      TEXT NOT NULL DEFAULT 'Present',
-            source      TEXT NOT NULL DEFAULT 'manual',  -- manual | sample | face_ai
+            source      TEXT NOT NULL DEFAULT 'manual',  -- manual | sample | face_ai | qr_scan
             FOREIGN KEY (roll_number) REFERENCES students(roll_number),
             UNIQUE (roll_number, subject, date)
         )

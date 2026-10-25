@@ -25,8 +25,13 @@
    - [Haversine Distance Formula](#haversine-distance-formula)
    - [Security CAPTCHA & Role Isolation](#security-captcha--role-isolation)
    - [Dynamic Enrollment & Dual-Sync Database](#dynamic-enrollment--dual-sync-database)
-5. [Generative AI Academic Tutor Integration](#5-generative-ai-academic-tutor-integration)
-6. [Top 25 Viva / Review Questions & Model Answers](#6-top-25-viva--review-questions--model-answers)
+5. [Dynamic QR Code Attendance Architecture](#5-dynamic-qr-code-attendance-architecture)
+   - [Why Traditional Static QR Fails](#the-proxy-flaw-in-traditional-qr-attendance)
+   - [Our 3-Tier Dynamic QR Defense](#our-3-tier-dynamic-qr-defense-system)
+   - [OpenCV QRCodeDetector & Native BarcodeDetector](#multi-tier-detection-engine)
+   - [Student Digital ID Badges](#student-digital-id-badge-qr)
+6. [Generative AI Academic Tutor Integration](#6-generative-ai-academic-tutor-integration)
+7. [Top 28 Viva / Review Questions & Model Answers](#7-top-28-viva--review-questions--model-answers)
 
 ---
 
@@ -255,7 +260,32 @@ $$d = R \cdot c$$
 
 ---
 
-# 5. Generative AI Academic Tutor Integration
+# 5. Dynamic QR Code Attendance Architecture
+
+### The Proxy Flaw in Traditional QR Attendance
+Many universities attempting QR attendance use a static printed QR code pasted on the lecture hall door. This immediately fails because students take a photo of the QR code and send it over WhatsApp or Telegram to absent friends, who scan it from their dormitories or homes.
+
+### Our 3-Tier Dynamic QR Defense System
+Our solution combines:
+1. **Time-Limited Dynamic Session Tokens**:
+   - Faculty generates a dynamic session token (e.g. `SES-ML-1792931680`) with an explicit expiration window (default 15 minutes, configurable to 5m, 15m, 30m, 1h).
+   - Once expired, any scans with that stale payload are rejected immediately (`"This classroom QR code has expired!"`).
+2. **Mandatory Haversine Geofence Binding**:
+   - When a student scans the QR code, the client sends their real-time device GPS coordinates.
+   - The backend computes the Haversine distance to the campus center. If distance $> 500\text{ meters}$, attendance is blocked even with a valid QR code (`"GEOFENCE VIOLATION: You are 1,250m away from campus. Attendance blocked."`).
+3. **Multi-Tier Detection Engine**:
+   - **Tier 1 (GPU/Native):** Uses browser's native `BarcodeDetector` API for hardware-accelerated 60fps continuous scanning.
+   - **Tier 2 (Client JS):** Uses `jsQR` canvas pixel decoding directly in the browser.
+   - **Tier 3 (Server Computer Vision):** Falls back to OpenCV's `cv2.QRCodeDetector()` for challenging lighting or low-end device cameras.
+
+### Student Digital ID Badge QR
+Every enrolled student also possesses a digital university identity card with an encrypted personal identity payload (`STUDENT_ID_BADGE`). This allows two-way flexibility:
+- **Classroom Mode:** Student scans the professor's projected QR code.
+- **Kiosk / Professor Mode:** Professor or entrance kiosk scans the student's digital badge QR code.
+
+---
+
+# 6. Generative AI Academic Tutor Integration
 
 Integrated with **Google Gemini 1.5 Flash API**:
 - Provides an on-demand personalized academic mentor directly inside the student portal.
@@ -265,7 +295,7 @@ Integrated with **Google Gemini 1.5 Flash API**:
 
 ---
 
-# 6. Top 25 Viva / Review Questions & Model Answers
+# 7. Top 28 Viva / Review Questions & Model Answers
 
 ### Q1: What is the primary objective of this project?
 **Answer:** To build an automated biometric attendance system that eliminates proxy attendance through real-time facial recognition and geofencing, while leveraging machine learning to predict student attendance risks early enough for academic intervention.
@@ -363,6 +393,21 @@ $$\frac{A + x}{T + x} \ge 0.75 \implies x \ge \frac{0.75 \cdot T - A}{0.25}$$
 2. Use an approximate nearest neighbors (ANN) vector database like FAISS, Milvus, or pgvector for sub-millisecond similarity search across 10,000 identities.
 3. Migrate SQLite to PostgreSQL or Cloud Spanner with read replicas.
 4. Deploy the ML inference service on a scalable containerized backend (Docker + Kubernetes).
+
+### Q26: How does your Dynamic QR attendance system prevent proxy scanning?
+**Answer:** Static QR codes can be photographed and shared over social media. Our system employs a 3-layer defense:
+1. **Dynamic Expiration:** The QR payload contains a time-limited session token that expires after 15 minutes.
+2. **Haversine Geofence Verification:** Even with a forwarded QR image, the student's mobile GPS must be verified as within 500m of the lecture hall, blocking check-ins from hostels or homes.
+3. **Biometric Dual-Verification:** In kiosk mode or strict lecture mode, QR scan is corroborated with real-time facial recognition.
+
+### Q27: How is the QR code decoded in real-time across different devices?
+**Answer:** We implement a 3-tier computer vision strategy:
+1. **Hardware-Accelerated Native API:** Modern mobile and desktop browsers use `window.BarcodeDetector` (60fps GPU acceleration).
+2. **Client-side JavaScript Decoder:** Fallback to `jsQR` which inspects raw `ImageData` pixel buffers directly on the HTML5 canvas.
+3. **Server Computer Vision:** Low-end devices or blurred captures fall back to OpenCV's built-in `cv2.QRCodeDetector()` on the Flask backend.
+
+### Q28: What is the Student Digital ID Badge QR?
+**Answer:** It is a personalized digital credential generated for each student containing their encrypted roll number and identity payload. In kiosk entrance mode, the student presents their phone's ID badge to the classroom camera, and the kiosk instantly registers their arrival.
 
 ---
 

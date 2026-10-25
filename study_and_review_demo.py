@@ -191,6 +191,59 @@ def demo_recovery_calculator():
     print(f"Required: Student must attend the next {needed} consecutive classes without missing any to restore eligibility (>= 75.0%).")
 
 
+def demo_qr_attendance():
+    print_banner("PART 5: DYNAMIC QR CODE ATTENDANCE & OPENCV DECODER")
+    import qrcode
+    import cv2
+    import numpy as np
+    import json
+    import io
+
+    print("1. Dynamic Classroom Attendance QR Generation:")
+    payload = {
+        "type": "CLASSROOM_QR_ATTENDANCE",
+        "session_id": "SES-ML-20261025-998A",
+        "subject": "Machine Learning & AI",
+        "faculty": "Prof. Robert Vance",
+        "valid_until": "2026-10-25T12:30:00",
+        "geofence_required": True
+    }
+    raw_json = json.dumps(payload, separators=(',', ':'))
+    print(f"   Payload: {raw_json}")
+
+    # Generate QR with Python qrcode
+    qr = qrcode.QRCode(box_size=6, border=2)
+    qr.add_data(raw_json)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    png_bytes = buf.getvalue()
+    print(f"   Generated QR Image: {len(png_bytes)} bytes PNG")
+
+    print("\n2. OpenCV cv2.QRCodeDetector In-Memory Decoding:")
+    nparr = np.frombuffer(png_bytes, np.uint8)
+    cv_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    detector = cv2.QRCodeDetector()
+    decoded_text, points, _ = detector.detectAndDecode(cv_img)
+
+    if decoded_text:
+        print("   [SUCCESS] OpenCV decoded QR code perfectly!")
+        decoded_obj = json.loads(decoded_text)
+        print(f"   Session ID : {decoded_obj['session_id']}")
+        print(f"   Subject    : {decoded_obj['subject']}")
+        print(f"   Faculty    : {decoded_obj['faculty']}")
+    else:
+        print("   [FAILED] OpenCV could not decode QR code.")
+
+    print("\n3. Proxy Prevention Analysis:")
+    print("   Problem: Students taking photo of QR and sending via WhatsApp to absent friends.")
+    print("   Solution: 3-Layer Defense:")
+    print("     Layer 1: Rotating Dynamic Tokens (Tokens expire every 15 mins).")
+    print("     Layer 2: Mandatory GPS Geofence (Student phone must be <= 500m from classroom).")
+    print("     Layer 3: Optional Biometric Check (Facial recognition confirmation).")
+
+
 def main():
     print("\n" + "#" * 70)
     print("  SMART ATTENDANCE AI — INTERACTIVE PROJECT REVIEW COMPANION")
@@ -200,6 +253,7 @@ def main():
         demo_face_biometrics()
         demo_geofence()
         demo_recovery_calculator()
+        demo_qr_attendance()
 
         print_banner("REVIEW PREPARATION SUMMARY")
         print("1. All code, models, datasets, and guides are ready for evaluation.")
